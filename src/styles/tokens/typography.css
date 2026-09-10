@@ -1,0 +1,80 @@
+/* DSIR typography. Helvetica Neue carries every label, deck, caption and interface element.
+   A serif carries editorial display and long-form body — the register the Digest already uses
+   in its features and on its covers.
+
+   SUBSTITUTION: the serif is Newsreader (Google Fonts), standing in for a licensed transitional
+   face. Helvetica Neue has no binary supplied and falls through its stack. Both are flagged in
+   readme.md — send the real files and only these two lines change. */
+@import url("https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,300;1,6..72,400&display=swap");
+:root{
+  --font-core:"Helvetica Neue","HelveticaNeue","Helvetica","Nimbus Sans","Arial",sans-serif;
+  --font-light:"Helvetica Neue Light","HelveticaNeue-Light","Helvetica Neue","Helvetica","Arial",sans-serif;
+  /* Editorial serif — display headlines and long-form body. */
+  --font-editorial:"Newsreader","Times New Roman",Times,Georgia,serif;
+  --font-mono:"Helvetica Neue","Helvetica",ui-monospace,monospace;
+
+  --weight-light:300; /* @kind font */
+  --weight-regular:400; /* @kind font */
+  --weight-medium:500; /* @kind font */
+  --weight-bold:700; /* @kind font */
+
+  /* size ramp — px, editorial scale, wide gaps at the top */
+  --size-mega:120px;
+  --size-display:72px;
+  --size-title:48px;
+  --size-head:32px;
+  --size-subhead:24px;
+  --size-lead:20px;
+  --size-body:16px;
+  --size-small:14px;
+  --size-label:12px;
+  --size-micro:10px;
+
+  /* line heights */
+  --lh-tight:0.92; /* @kind other */
+  --lh-head:1.06; /* @kind other */
+  --lh-snug:1.28; /* @kind other */
+  --lh-body:1.5; /* @kind other */
+  --lh-loose:1.7; /* @kind other */
+
+  /* tracking — large type tightens, small caps type opens up */
+  --track-mega:-0.045em; /* @kind other */
+  --track-display:-0.035em; /* @kind other */
+  --track-title:-0.025em; /* @kind other */
+  --track-head:-0.015em; /* @kind other */
+  --track-body:-0.005em; /* @kind other */
+  --track-label:0.14em; /* @kind other */
+  --track-micro:0.2em; /* @kind other */
+
+  /* composed roles */
+  --type-mega:var(--weight-light) var(--size-mega)/var(--lh-tight) var(--font-light);
+  --type-display:var(--weight-light) var(--size-display)/var(--lh-tight) var(--font-light);
+  --type-title:var(--weight-light) var(--size-title)/var(--lh-head) var(--font-light);
+  --type-head:var(--weight-regular) var(--size-head)/var(--lh-head) var(--font-core);
+  --type-subhead:var(--weight-regular) var(--size-subhead)/var(--lh-snug) var(--font-core);
+  --type-lead:var(--weight-light) var(--size-lead)/var(--lh-snug) var(--font-light);
+  --type-body:var(--weight-regular) var(--size-body)/var(--lh-body) var(--font-core);
+  --type-small:var(--weight-regular) var(--size-small)/var(--lh-body) var(--font-core);
+  --type-label:var(--weight-bold) var(--size-label)/1.2 var(--font-core);
+  --type-micro:var(--weight-bold) var(--size-micro)/1.2 var(--font-core);
+
+  --type-subline:var(--weight-regular) var(--size-small)/1.4 var(--font-core);
+  --track-subline:0.34em; /* @kind other */
+
+  --type-caps-lux:var(--weight-light) var(--size-label)/1.4 var(--font-light);
+  --track-lux:0.42em; /* @kind other */
+
+  /* serif roles — optical sizing on, tracking near zero, generous line height for reading */
+  --type-serif-mega:var(--weight-light) var(--size-mega)/1.0 var(--font-editorial);
+  --type-serif-display:var(--weight-regular) var(--size-display)/1.04 var(--font-editorial);
+  --type-serif-title:var(--weight-regular) var(--size-title)/1.08 var(--font-editorial);
+  --type-serif-head:var(--weight-regular) var(--size-head)/1.16 var(--font-editorial);
+  --type-serif-sub:var(--weight-regular) var(--size-subhead)/1.24 var(--font-editorial);
+  --type-serif-body:var(--weight-regular) var(--size-lead)/1.62 var(--font-editorial);
+  --track-serif:-0.008em; /* @kind other */
+  --track-serif-tight:-0.02em; /* @kind other */
+
+  --measure-serif:38em; /* @kind spacing */
+  --measure-text:64ch; /* @kind spacing */
+  --measure-lead:48ch; /* @kind spacing */
+}

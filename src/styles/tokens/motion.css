@@ -1,0 +1,15 @@
+/* Motion is a cut, not a cushion. Short, linear-ish, no bounce, no scale-up entrances. */
+:root{
+  --dur-instant:80ms; /* @kind other */
+  --dur-fast:140ms; /* @kind other */
+  --dur-base:220ms; /* @kind other */
+  --dur-slow:420ms; /* @kind other */
+  --dur-marquee:22s; /* @kind other */
+
+  --ease-cut:cubic-bezier(0.2,0,0,1); /* @kind other */
+  --ease-out:cubic-bezier(0.16,1,0.3,1); /* @kind other */
+  --ease-linear:linear; /* @kind other */
+
+  --transition-state:color var(--dur-fast) var(--ease-cut),background-color var(--dur-fast) var(--ease-cut),border-color var(--dur-fast) var(--ease-cut),opacity var(--dur-fast) var(--ease-cut); /* @kind other */
+}
+@media (prefers-reduced-motion:reduce){:root{--dur-fast:0ms; /* @kind other */--dur-base:0ms; /* @kind other */--dur-slow:0ms; /* @kind other */--dur-marquee:0s; /* @kind other */}}

@@ -1,0 +1,119 @@
+---
+import { SITE, SECTIONS } from '../data/site';
+
+const issueHref = `/issue/${SITE.currentIssue}/`;
+
+const GROUPS: Array<[heading: string, items: Array<[label: string, href: string]>]> = [
+  ['Sections', SECTIONS.map((s) => [s.label, `/section/${s.slug}/`] as [string, string])],
+  [
+    'The Review',
+    [
+      ['Current Issue', issueHref],
+      ['Archive', '/archive/'],
+      ['Masthead', '/about/'],
+      ['Submit', '/submit/'],
+    ],
+  ],
+  [
+    'Elsewhere',
+    [
+      ['Instagram', 'https://www.instagram.com/'],
+      ['Newsletter', '/submit/'],
+      ['Contact', '/about/'],
+    ],
+  ],
+];
+---
+
+<footer class="site-footer">
+  <div class="site-footer__grid dsir-shell">
+    <div class="site-footer__brand">
+      <a class="site-footer__wordmark" href={issueHref}>DSIR.</a>
+      <p class="site-footer__blurb">{SITE.blurb}</p>
+    </div>
+
+    {
+      GROUPS.map(([heading, items]) => (
+        <div class="site-footer__group">
+          <span class="caps caps--micro caps--faint">{heading}</span>
+          {items.map(([label, href]) => (
+            <a class="site-footer__link" href={href}>
+              {label}
+            </a>
+          ))}
+        </div>
+      ))
+    }
+  </div>
+
+  <div class="site-footer__base dsir-shell">
+    <span class="caps caps--micro caps--faint">{SITE.place}</span>
+    <span class="caps caps--micro caps--faint">{SITE.copyright}</span>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    margin-top: 120px;
+    border-top: var(--line-accent);
+    padding-block: 48px 72px;
+  }
+
+  .site-footer__grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr;
+    gap: 48px;
+  }
+
+  .site-footer__brand {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .site-footer__wordmark {
+    font-family: var(--font-light);
+    font-weight: var(--weight-regular);
+    font-size: 44px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: var(--text-body);
+  }
+
+  .site-footer__blurb {
+    font: var(--type-small);
+    color: var(--text-muted);
+    margin: 0;
+    max-width: 34ch;
+    line-height: 1.65;
+  }
+
+  .site-footer__group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .site-footer__link {
+    font: var(--type-small);
+    color: var(--text-body);
+  }
+
+  .site-footer__base {
+    margin-top: 44px;
+    display: flex;
+    justify-content: space-between;
+    gap: 24px;
+  }
+
+  @media (max-width: 900px) {
+    .site-footer__grid { grid-template-columns: 1fr 1fr; }
+    .site-footer__brand { grid-column: 1 / -1; }
+  }
+
+  @media (max-width: 560px) {
+    .site-footer { margin-top: 72px; }
+    .site-footer__grid { grid-template-columns: 1fr; gap: 32px; }
+    .site-footer__base { flex-direction: column; gap: 8px; }
+  }
+</style>

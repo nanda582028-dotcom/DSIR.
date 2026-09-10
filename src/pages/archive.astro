@@ -1,0 +1,358 @@
+---
+import { getCollection } from 'astro:content';
+import PageShell from '../components/PageShell.astro';
+import DuotoneImage from '../components/DuotoneImage.astro';
+import { SECTIONS, SITE, ISSUES, sectionLabel } from '../data/site';
+
+/* Everything on this page is derived from the article collection, and the filters
+   act on that same data — they are real, not decorative. */
+const articles = (await getCollection('articles')).sort(
+  (a, b) => b.data.date.valueOf() - a.data.date.valueOf(),
+);
+
+const years = [...new Set(articles.map((a) => String(a.data.date.getFullYear())))].sort().reverse();
+
+const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+---
+
+<PageShell
+  title={`Archive — ${SITE.title}`}
+  description="Every piece DSIR has published, by section, year and issue."
+  route="archive"
+>
+  <div class="dsir-shell dsir-shell--narrow arc">
+    <div class="caps caps--accent">Archive</div>
+    <h1 class="headline headline--mega arc__title">Every piece</h1>
+
+    <div class="arc__controls">
+      <label class="field">
+        <span class="field__label">Search the archive</span>
+        <input
+          class="field__input"
+          type="search"
+          id="arc-search"
+          placeholder="Title, writer, section"
+          autocomplete="off"
+        />
+      </label>
+
+      <label class="field">
+        <span class="field__label">Year</span>
+        <div class="field__selectwrap">
+          <select class="field__input field__select" id="arc-year">
+            <option value="">All years</option>
+            {years.map((y) => <option value={y}>{y}</option>)}
+          </select>
+          <span class="field__caret" aria-hidden="true">▼</span>
+        </div>
+      </label>
+
+      <label class="field">
+        <span class="field__label">Order</span>
+        <div class="field__selectwrap">
+          <select class="field__input field__select" id="arc-order">
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="title">By title</option>
+          </select>
+          <span class="field__caret" aria-hidden="true">▼</span>
+        </div>
+      </label>
+    </div>
+
+    <nav class="tabs" id="arc-tabs" aria-label="Filter by section">
+      <button class="tabs__tab is-active" type="button" data-section="">All</button>
+      {
+        SECTIONS.map((s) => (
+          <button class="tabs__tab" type="button" data-section={s.slug}>
+            {s.label}
+          </button>
+        ))
+      }
+    </nav>
+
+    <p class="arc__count" id="arc-count" aria-live="polite"></p>
+
+    <section class="arc__grid" id="arc-grid">
+      {
+        articles.map((a) => (
+          <a
+            class="card-link arc__item"
+            href={`/article/${a.id}/`}
+            data-section={a.data.section}
+            data-year={a.data.date.getFullYear()}
+            data-date={a.data.date.toISOString()}
+            data-title={a.data.title.toLowerCase()}
+            data-haystack={`${a.data.title} ${a.data.author} ${sectionLabel(a.data.section)} ${a.data.kicker ?? ''} ${a.data.tags.join(' ')}`.toLowerCase()}
+          >
+            <DuotoneImage
+              src={a.data.heroImage}
+              alt={a.data.heroAlt ?? ''}
+              label={(a.data.kicker ?? sectionLabel(a.data.section)).toUpperCase()}
+              tone={a.data.featured ? 'red' : 'mono'}
+              ratio="3 / 4"
+            />
+            <div class="arc__meta">
+              <span class="caps caps--micro">{sectionLabel(a.data.section)}</span>
+              <span class="caps caps--micro caps--faint">{fmt(a.data.date)}</span>
+            </div>
+            <h2 class="headline headline--sub arc__headline">{a.data.title}</h2>
+            <span class="arc__by">{a.data.author}</span>
+          </a>
+        ))
+      }
+    </section>
+
+    <p class="arc__empty" id="arc-empty" hidden>Nothing matches those filters.</p>
+
+    <section class="arc__issues">
+      <div class="caps caps--micro caps--faint arc__issueshead">Issues</div>
+      <div class="arc__issuegrid">
+        {
+          ISSUES.map((i) => (
+            <div class="arc__issue">
+              <div class="arc__issueplate">
+                <DuotoneImage label={`ISSUE ${i.n}`} ratio="3 / 4" tone={i.live ? 'red' : 'mono'} />
+                {i.live && <span class="arc__badge caps caps--micro">Current</span>}
+              </div>
+              <div class="arc__meta">
+                <span class="caps caps--micro">
+                  {i.season} {i.n}
+                </span>
+                <span class="caps caps--micro caps--faint">{i.date}</span>
+              </div>
+            </div>
+          ))
+        }
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const grid = document.getElementById('arc-grid')!;
+    const items = Array.from(grid.querySelectorAll<HTMLElement>('.arc__item'));
+    const search = document.getElementById('arc-search') as HTMLInputElement;
+    const year = document.getElementById('arc-year') as HTMLSelectElement;
+    const order = document.getElementById('arc-order') as HTMLSelectElement;
+    const tabs = document.getElementById('arc-tabs')!;
+    const count = document.getElementById('arc-count')!;
+    const empty = document.getElementById('arc-empty') as HTMLElement;
+
+    let section = '';
+
+    function apply() {
+      const q = search.value.trim().toLowerCase();
+      const y = year.value;
+      let shown = 0;
+
+      for (const el of items) {
+        const okSection = !section || el.dataset.section === section;
+        const okYear = !y || el.dataset.year === y;
+        const okQuery = !q || (el.dataset.haystack ?? '').includes(q);
+        const visible = okSection && okYear && okQuery;
+        el.hidden = !visible;
+        if (visible) shown++;
+      }
+
+      const sorted = [...items].sort((a, b) => {
+        if (order.value === 'title') {
+          return (a.dataset.title ?? '').localeCompare(b.dataset.title ?? '');
+        }
+        const da = Date.parse(a.dataset.date ?? '');
+        const db = Date.parse(b.dataset.date ?? '');
+        return order.value === 'oldest' ? da - db : db - da;
+      });
+      sorted.forEach((el) => grid.appendChild(el));
+
+      count.textContent = `${shown} ${shown === 1 ? 'piece' : 'pieces'}`;
+      empty.hidden = shown !== 0;
+    }
+
+    search.addEventListener('input', apply);
+    year.addEventListener('change', apply);
+    order.addEventListener('change', apply);
+
+    tabs.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.tabs__tab');
+      if (!btn) return;
+      section = btn.dataset.section ?? '';
+      tabs.querySelectorAll('.tabs__tab').forEach((t) => t.classList.toggle('is-active', t === btn));
+      apply();
+    });
+
+    apply();
+  </script>
+</PageShell>
+
+<style>
+  .arc { padding-top: 64px; }
+
+  .arc__title { margin-top: 12px; }
+
+  .arc__controls {
+    display: flex;
+    gap: 20px;
+    align-items: flex-end;
+    margin-top: 32px;
+    flex-wrap: wrap;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    min-width: 200px;
+  }
+
+  .field:first-child { min-width: 280px; flex: 1; }
+
+  .field__label {
+    font: var(--type-micro);
+    letter-spacing: var(--track-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .field__input {
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--border-strong);
+    border-radius: 0;
+    padding: 10px 0;
+    font: var(--type-body);
+    font-family: var(--font-core);
+    color: var(--text-body);
+    width: 100%;
+    transition: var(--transition-state);
+  }
+
+  .field__input:focus { border-bottom-color: var(--text-body); }
+
+  .field__selectwrap { position: relative; }
+
+  .field__select { appearance: none; padding-right: 24px; }
+
+  .field__caret {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: var(--red);
+    font-size: 11px;
+  }
+
+  .tabs {
+    margin-top: 36px;
+    display: flex;
+    gap: var(--space-7);
+    border-bottom: var(--line-hairline);
+    flex-wrap: wrap;
+  }
+
+  .tabs__tab {
+    background: none;
+    border: 0;
+    border-bottom: 1px solid transparent;
+    padding: 0 0 14px;
+    margin-bottom: -1px;
+    cursor: pointer;
+    font-family: var(--font-light);
+    font-weight: var(--weight-light);
+    font-size: var(--size-label);
+    letter-spacing: var(--track-lux);
+    text-transform: uppercase;
+    color: var(--text-faint);
+    transition: var(--transition-state);
+  }
+
+  .tabs__tab:hover { color: var(--text-accent); }
+
+  .tabs__tab.is-active {
+    color: var(--text-body);
+    border-bottom-color: var(--text-body);
+  }
+
+  .arc__count {
+    margin: 20px 0 0;
+    font: var(--type-micro);
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  .arc__grid {
+    margin-top: 20px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 40px 28px;
+  }
+
+  .arc__item {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .arc__meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  .arc__by {
+    font: var(--type-small);
+    color: var(--text-muted);
+  }
+
+  .arc__empty {
+    margin-top: 32px;
+    font: var(--type-lead);
+    color: var(--text-muted);
+  }
+
+  .arc__issues {
+    margin-top: 96px;
+    padding-top: 32px;
+    border-top: var(--line-strong);
+  }
+
+  .arc__issueshead { margin-bottom: 24px; }
+
+  .arc__issuegrid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 28px;
+  }
+
+  .arc__issue {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .arc__issueplate { position: relative; }
+
+  .arc__badge {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 4;
+    background: var(--white);
+    color: var(--black);
+    padding: 4px 10px;
+  }
+
+  @media (max-width: 1080px) {
+    .arc__grid,
+    .arc__issuegrid { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  @media (max-width: 760px) {
+    .arc { padding-top: 40px; }
+    .arc__grid,
+    .arc__issuegrid { grid-template-columns: repeat(2, 1fr); gap: 28px 18px; }
+    .field:first-child { min-width: 100%; }
+  }
+</style>

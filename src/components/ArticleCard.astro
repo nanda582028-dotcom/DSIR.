@@ -1,0 +1,55 @@
+---
+import DuotoneImage from './DuotoneImage.astro';
+import { sectionLabel } from '../data/site';
+import type { CollectionEntry } from 'astro:content';
+
+/* The recurring unit: caps flag, serif headline, Helvetica deck, name underneath.
+   No box, no border, no shadow. */
+interface Props {
+  article: CollectionEntry<'articles'>;
+  ratio?: string;
+  level?: 'head' | 'sub' | 'title';
+  showDeck?: boolean;
+}
+
+const { article, ratio = '16 / 10', level = 'head', showDeck = true } = Astro.props;
+const { data } = article;
+const flag = data.kicker ?? sectionLabel(data.section);
+---
+
+<a class="card-link card" href={`/article/${article.id}/`}>
+  <DuotoneImage
+    src={data.heroImage}
+    alt={data.heroAlt ?? ''}
+    label={flag.toUpperCase()}
+    tone="mono"
+    ratio={ratio}
+  />
+  <div class="caps card__flag">{flag}</div>
+  <h2 class:list={['headline', `headline--${level}`]}>{data.title}</h2>
+  {showDeck && <p class="card__deck">{data.standfirst}</p>}
+  <span class="card__by">{data.author}</span>
+</a>
+
+<style>
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .card__flag { color: var(--text-muted); }
+
+  .card__deck {
+    font: var(--type-body);
+    color: var(--text-body);
+    margin: 0;
+    max-width: 42ch;
+    line-height: 1.55;
+  }
+
+  .card__by {
+    font: var(--type-body);
+    color: var(--text-muted);
+  }
+</style>

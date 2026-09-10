@@ -1,0 +1,16 @@
+/* Corners are square. The only curve in the system is the pill, used for tags and status chips. */
+:root{
+  --radius-none:0px;
+  --radius-hair:2px;
+  --radius-pill:999px;
+
+  --border-hair:1px; /* @kind spacing */
+  --border-rule:1px; /* @kind spacing */
+  --border-heavy:2px; /* @kind spacing */
+  --border-slab:4px; /* @kind spacing */
+
+  --line-hairline:1px solid var(--border); /* @kind other */
+  --line-strong:1px solid var(--border-strong); /* @kind other */
+  --line-accent:2px solid var(--red); /* @kind other */
+  --line-slab:4px solid var(--white); /* @kind other */
+}

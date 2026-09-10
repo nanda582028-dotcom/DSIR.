@@ -1,0 +1,194 @@
+/* Token layer — ported verbatim from the design system. Order matches its styles.css. */
+@import "./tokens/typography.css";
+@import "./tokens/colors.css";
+@import "./tokens/spacing.css";
+@import "./tokens/radius-border.css";
+@import "./tokens/elevation.css";
+@import "./tokens/motion.css";
+@import "./tokens/base.css";
+
+/* ---------------------------------------------------------------------------
+   Site layer. Nothing here invents a value; every number is lifted from the
+   prototypes in design/ or from the token files above.
+   --------------------------------------------------------------------------- */
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+/* Any component that sets its own `display` would otherwise outrank the user
+   agent's [hidden] rule, so state toggled with the attribute must stay hidden. */
+[hidden] { display: none !important; }
+
+body { text-rendering: optimizeLegibility; }
+
+img { max-width: 100%; }
+
+/* The site sits on white; the intro is the one view that keeps the black ground. */
+.dsir-page {
+  position: relative;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text-body);
+  font-family: var(--font-core);
+}
+
+.dsir-shell {
+  max-width: 1360px;
+  margin: 0 auto;
+  padding-inline: 40px;
+}
+
+.dsir-shell--narrow { max-width: 1320px; }
+
+/* Standing furniture: letterspaced caps, Helvetica. Never used for body headlines. */
+.caps {
+  font-family: var(--font-core);
+  font-weight: var(--weight-regular);
+  font-size: var(--size-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+}
+
+.caps--micro { font-size: var(--size-micro); }
+.caps--muted { color: var(--text-muted); }
+.caps--faint { color: var(--text-faint); }
+.caps--accent { color: var(--text-accent); }
+
+/* Serif display scale — the Headline component's `serif` map. */
+.headline { margin: 0; text-wrap: pretty; color: var(--text-body); }
+.headline--mega    { font: var(--type-serif-mega);    letter-spacing: var(--track-serif-tight); }
+.headline--display { font: var(--type-serif-display); letter-spacing: var(--track-serif-tight); }
+.headline--title   { font: var(--type-serif-title);   letter-spacing: var(--track-serif); }
+.headline--head    { font: var(--type-serif-head);    letter-spacing: var(--track-serif); }
+.headline--sub     { font: var(--type-serif-sub);     letter-spacing: var(--track-serif); }
+.headline--accent  { color: var(--text-accent); }
+.headline--inverse { color: var(--white); }
+
+.standfirst {
+  font: var(--type-lead);
+  letter-spacing: var(--track-body);
+  color: var(--text-muted);
+  max-width: var(--measure-lead);
+  margin: 0;
+  text-wrap: pretty;
+}
+
+/* Long-form body. Ragged-right on the web; the print Digest justifies. */
+.dsir-prose {
+  font-family: var(--font-editorial);
+  font-weight: var(--weight-regular);
+  font-size: var(--size-lead);
+  line-height: 1.62;
+  letter-spacing: var(--track-serif);
+  text-align: left;
+}
+
+.dsir-prose > p { margin: 0 0 26px; }
+.dsir-prose > p:last-child { margin-bottom: 0; }
+.dsir-prose h2 {
+  font: var(--type-serif-head);
+  letter-spacing: var(--track-serif);
+  margin: 44px 0 18px;
+}
+.dsir-prose blockquote {
+  margin: 40px 0;
+  padding: 28px 0;
+  border-top: var(--line-hairline);
+  border-bottom: var(--line-hairline);
+}
+.dsir-prose blockquote p {
+  margin: 0;
+  font: var(--type-serif-head);
+  letter-spacing: var(--track-head);
+}
+.dsir-prose blockquote footer {
+  margin-top: 16px;
+  font-family: var(--font-core);
+  font-size: var(--size-micro);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-accent);
+}
+
+/* Links: hover turns red, press nudges 1px. Nothing scales. */
+a { transition: var(--transition-state); }
+a:active { transform: translateY(1px); }
+
+/* Focus is a 2px red outline at 2px offset, and is never removed. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Card rows on the grids: the image lifts a veil on hover, nothing else moves. */
+.card-link { display: block; color: inherit; text-decoration: none; }
+.card-link:hover .headline { color: var(--text-accent); }
+
+.rule { border: 0; border-top: var(--line-hairline); width: 100%; margin: 0; }
+.rule--strong { border-top: var(--line-strong); }
+.rule--accent { border-top: var(--line-accent); }
+
+/* Tag pill — the single exception to square corners. */
+.tag {
+  font: var(--type-micro);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 14px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Responsive. Prototypes were drawn at desktop width; grids collapse to one
+   column and the reading measure narrows.
+   --------------------------------------------------------------------------- */
+
+@media (max-width: 1080px) {
+  :root {
+    --size-mega: 84px;
+    --size-display: 56px;
+    --size-title: 40px;
+    --size-head: 28px;
+  }
+  .dsir-shell { padding-inline: 28px; }
+}
+
+@media (max-width: 760px) {
+  :root {
+    --size-mega: 54px;
+    --size-display: 38px;
+    --size-title: 30px;
+    --size-head: 24px;
+    --size-subhead: 21px;
+    --size-lead: 18px;
+  }
+  .dsir-shell { padding-inline: 20px; }
+  .dsir-prose { font-size: 18px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  a:active { transform: none; }
+}

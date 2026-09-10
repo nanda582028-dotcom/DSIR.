@@ -1,0 +1,310 @@
+---
+import Base from '../layouts/Base.astro';
+import { SITE, SECTIONS } from '../data/site';
+
+/* The site's front door: a scroll-driven sequence on black. Every word of it is
+   real text in the DOM, so the page reads perfectly without canvas or JS. */
+
+const issueHref = `/issue/${SITE.currentIssue}/`;
+
+/* The four section beats, in the order the canvas resolves them. */
+const BEATS = ['film', 'music', 'literature', 'culture'].map((slug) => {
+  const s = SECTIONS.find((x) => x.slug === slug)!;
+  return { key: slug === 'literature' ? 'lit' : slug, label: s.label, descriptor: s.descriptor };
+});
+---
+
+<Base title={`${SITE.title} — Pop culture, read seriously.`} invert={false} bodyClass="intro-body">
+  <!-- Returning readers are not made to sit through it twice. -->
+  <script is:inline define:vars={{ issueHref }}>
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('skip')) {
+        window.localStorage.setItem('dsir:seen-intro', '1');
+        window.location.replace(issueHref);
+      } else if (!params.has('replay') && window.localStorage.getItem('dsir:seen-intro')) {
+        window.location.replace(issueHref);
+      }
+    } catch (e) {
+      /* Private mode or blocked storage: the intro simply plays. */
+    }
+  </script>
+
+  <div class="intro">
+    <div class="intro__header">
+      <div class="intro__headerside">
+        <a class="intro__wordmark" href={issueHref}>DSIR.</a>
+        <span class="intro__headerdim">{SITE.title}</span>
+      </div>
+      <div class="intro__headerside intro__headerside--end">
+        <span class="intro__flag">
+          <span class="intro__square" aria-hidden="true"></span>
+          {SITE.currentIssueLabel} — out now
+        </span>
+        <a class="intro__skip" href={`${issueHref}?from=intro`} data-intro-skip>Skip</a>
+      </div>
+    </div>
+
+    <div class="intro__track" data-intro="track">
+      <div class="intro__stage">
+        <canvas class="intro__canvas" data-intro="canvas" aria-hidden="true"></canvas>
+
+        <div class="intro__overlay intro__overlay--centre" data-intro="s1">
+          <span class="intro__kicker intro__kicker--red">{SITE.currentIssueLabel}</span>
+          <h1 class="intro__h1">Pop culture, read seriously.</h1>
+        </div>
+
+        <div class="intro__overlay intro__overlay--centre" data-intro="s2">
+          <span class="intro__kicker">Weekly</span>
+          <p class="intro__h2">Essays, reviews and cultural analysis.</p>
+        </div>
+
+        {
+          BEATS.map((b) => (
+            <div class="intro__overlay intro__overlay--beat" data-intro={b.key}>
+              <h2 class="intro__beat">{b.label}</h2>
+              <span class="intro__kicker">{b.descriptor}</span>
+            </div>
+          ))
+        }
+
+        <div class="intro__overlay intro__overlay--centre" data-intro="enter">
+          <span class="intro__kicker">Issue {SITE.currentIssue} · {SITE.currentIssueDate}</span>
+          <h2 class="intro__enter">Enter the Review</h2>
+          <a class="intro__button" href={`${issueHref}?from=intro`} data-intro-skip>
+            Read Issue {SITE.currentIssue} <span aria-hidden="true">→</span>
+          </a>
+        </div>
+
+        <div class="intro__bar" data-intro="bar" aria-hidden="true"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    import { startIntro } from '../scripts/intro';
+
+    /* Mark the intro as seen the moment the reader leaves it for the issue. */
+    document.querySelectorAll('[data-intro-skip]').forEach((el) => {
+      el.addEventListener('click', () => {
+        try {
+          window.localStorage.setItem('dsir:seen-intro', '1');
+        } catch (e) {
+          /* nothing to do */
+        }
+      });
+    });
+
+    startIntro();
+  </script>
+</Base>
+
+<style>
+  .intro-body,
+  .intro {
+    background: var(--black);
+    color: var(--white);
+  }
+
+  .intro {
+    font-family: var(--font-core);
+  }
+
+  /* Anchors already inherit white from the token layer on this black ground.
+     A blanket `color: inherit` here would outrank the scoped rules below and
+     paint the button's ink white on its own white ground. */
+  .intro :global(a) { text-decoration: none; }
+
+  /* Fixed header, above everything. */
+  .intro__header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 30;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 24px;
+    padding: 20px 28px;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .intro__headerside {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+  }
+
+  .intro__headerside--end { gap: 18px; }
+
+  .intro__wordmark {
+    font-size: 15px;
+    letter-spacing: -0.01em;
+    text-transform: none;
+  }
+
+  .intro__headerdim { color: rgba(255, 255, 255, 0.45); }
+
+  .intro__flag {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .intro__square {
+    width: 6px;
+    height: 6px;
+    background: var(--red);
+  }
+
+  .intro__skip { color: rgba(255, 255, 255, 0.45); }
+
+  .intro__skip:hover,
+  .intro__wordmark:hover { color: var(--red); }
+
+  /* A 900vh track holding one sticky stage. */
+  .intro__track {
+    height: 900vh;
+    position: relative;
+  }
+
+  .intro__stage {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .intro__canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .intro__overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+  }
+
+  .intro__overlay--centre {
+    justify-content: center;
+    gap: 22px;
+    padding: 0 32px;
+  }
+
+  /* Beats sit low so the canvas object holds the upper two thirds. */
+  .intro__overlay--beat {
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 0 32px 10vh;
+  }
+
+  .intro__kicker {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.55);
+  }
+
+  .intro__kicker--red { color: var(--red); }
+
+  .intro__h1 {
+    margin: 0;
+    font-family: var(--font-editorial);
+    font-weight: 400;
+    font-size: clamp(44px, 7.4vw, 104px);
+    line-height: 1.02;
+    letter-spacing: -0.035em;
+    max-width: 18ch;
+    text-wrap: pretty;
+  }
+
+  .intro__h2 {
+    margin: 0;
+    font-family: var(--font-editorial);
+    font-weight: 300;
+    font-size: clamp(26px, 3.6vw, 46px);
+    line-height: 1.24;
+    letter-spacing: -0.02em;
+    max-width: 26ch;
+    text-wrap: pretty;
+  }
+
+  .intro__beat {
+    margin: 0;
+    font-family: var(--font-editorial);
+    font-weight: 400;
+    font-size: clamp(40px, 6.4vw, 84px);
+    line-height: 1;
+    letter-spacing: -0.035em;
+  }
+
+  .intro__enter {
+    margin: 0;
+    font-family: var(--font-editorial);
+    font-weight: 400;
+    font-size: clamp(38px, 6vw, 84px);
+    line-height: 1.04;
+    letter-spacing: -0.035em;
+  }
+
+  .intro__button {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 26px;
+    background: var(--white);
+    color: var(--black);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    transition: var(--transition-state);
+  }
+
+  .intro__button:hover {
+    background: var(--red);
+    color: var(--white);
+  }
+
+  /* The progress rule: 2px of red pinned to the bottom edge. */
+  .intro__bar {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 2px;
+    width: 0;
+    background: var(--red);
+  }
+
+  /* Without JS the overlays would never be revealed, so show them stacked as a
+     plain readable sequence instead. */
+  :global(html.no-js) .intro__track { height: auto; }
+  :global(html.no-js) .intro__stage { position: static; height: auto; }
+  :global(html.no-js) .intro__overlay {
+    position: static;
+    opacity: 1;
+    pointer-events: auto;
+    padding-block: 12vh;
+  }
+
+  @media (max-width: 640px) {
+    .intro__header {
+      padding: 14px 18px;
+      font-size: 10px;
+      gap: 12px;
+    }
+    .intro__headerdim { display: none; }
+  }
+</style>

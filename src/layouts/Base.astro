@@ -1,0 +1,63 @@
+---
+import '../styles/global.css';
+import { SITE } from '../data/site';
+
+interface Props {
+  title: string;
+  description?: string;
+  /* The intro is the one view that keeps the black ground; everything else runs
+     on white inside the .dsir-invert scope. */
+  invert?: boolean;
+  bodyClass?: string;
+}
+
+const {
+  title,
+  description = SITE.blurb,
+  invert = true,
+  bodyClass,
+} = Astro.props;
+---
+
+<!doctype html>
+<html lang="en-GB" class="no-js">
+  <head>
+    <meta charset="utf-8" />
+    <script is:inline>document.documentElement.classList.remove('no-js');</script>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <meta name="theme-color" content="#000000" />
+    <meta property="og:site_name" content={SITE.title} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+  </head>
+  <body class:list={[invert && 'dsir-invert', bodyClass]}>
+    <a class="skip-to-content" href="#main">Skip to content</a>
+    <slot />
+    <style is:global>
+      body { background: var(--bg); color: var(--text-body); }
+
+      .skip-to-content {
+        position: absolute;
+        left: -9999px;
+        top: 0;
+        z-index: 100;
+        background: var(--red);
+        color: var(--white);
+        font-family: var(--font-core);
+        font-size: var(--size-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+        padding: 12px 22px;
+      }
+
+      .skip-to-content:focus {
+        left: 0;
+      }
+    </style>
+  </body>
+</html>

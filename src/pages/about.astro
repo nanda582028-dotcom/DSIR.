@@ -1,0 +1,141 @@
+---
+import PageShell from '../components/PageShell.astro';
+import DuotoneImage from '../components/DuotoneImage.astro';
+import PullQuote from '../components/PullQuote.astro';
+import {
+  SITE,
+  BOARD,
+  ASSOCIATE_EDITORS,
+  SENIOR_CORRESPONDENTS,
+  MASTER_IN_CHARGE,
+} from '../data/site';
+
+const GROUPS: Array<[heading: string, names: string[]]> = [
+  ['Associate Editors', ASSOCIATE_EDITORS],
+  ['Senior Correspondents', SENIOR_CORRESPONDENTS],
+];
+---
+
+<PageShell title={`About — ${SITE.title}`} route="about">
+  <div class="dsir-shell dsir-shell--narrow about">
+    <div class="about__cols">
+      <div class="about__statement">
+        <div class="caps caps--accent">About</div>
+        <h1 class="headline headline--display">{SITE.title}</h1>
+        <p class="standfirst">
+          A student publication of essays, reviews, cultural analysis, interviews and columns,
+          published from Dehradun. In 2026 it added the Digest, a weekly issue on a faster cycle.
+        </p>
+        <hr class="rule rule--accent" />
+        <p class="about__body">
+          Readership and authorship in the School have been decreasing at a constant pace. The same
+          ten names appear on publications, and we tend to forget those names can be ours. The
+          character of any publication is defined by the variety of people who contribute to it.
+        </p>
+        <PullQuote attribution="Editorial, Digest Issue 01">
+          We are in a pursuit of greatness.
+        </PullQuote>
+      </div>
+
+      <div class="about__masthead">
+        <DuotoneImage label="THE BOARD" ratio="4 / 3" tone="mono" />
+
+        <div class="about__list">
+          <div class="caps">Masthead</div>
+
+          {
+            BOARD.map(([name, role]) => (
+              <div class="about__row">
+                <span class="about__name">{name}</span>
+                <span class="caps caps--micro caps--faint">{role}</span>
+              </div>
+            ))
+          }
+
+          {
+            GROUPS.map(([heading, names]) => (
+              <div class="about__group">
+                <span class="caps caps--micro caps--faint">{heading}</span>
+                <span class="about__names">{names.join(' · ')}</span>
+              </div>
+            ))
+          }
+
+          <div class="about__row">
+            <span class="about__name">{MASTER_IN_CHARGE[0]}</span>
+            <span class="caps caps--micro caps--faint">{MASTER_IN_CHARGE[1]}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</PageShell>
+
+<style>
+  .about { padding-top: 64px; }
+
+  .about__cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 56px;
+    align-items: start;
+  }
+
+  .about__statement {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  .about__body {
+    font: var(--type-body);
+    color: var(--text-muted);
+    margin: 0;
+    max-width: var(--measure-text);
+  }
+
+  .about__masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  .about__list {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .about__row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 20px;
+    border-top: var(--line-hairline);
+    padding-top: 12px;
+  }
+
+  .about__name { font: var(--type-body); }
+
+  .about__group {
+    border-top: var(--line-hairline);
+    padding-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .about__names {
+    font: var(--type-body);
+    color: var(--text-muted);
+  }
+
+  @media (max-width: 900px) {
+    .about__cols { grid-template-columns: 1fr; gap: 44px; }
+  }
+
+  @media (max-width: 560px) {
+    .about { padding-top: 40px; }
+    .about__row { flex-direction: column; gap: 4px; }
+  }
+</style>

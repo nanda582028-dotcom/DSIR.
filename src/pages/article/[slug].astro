@@ -1,0 +1,210 @@
+---
+import { getCollection, render } from 'astro:content';
+import PageShell from '../../components/PageShell.astro';
+import DuotoneImage from '../../components/DuotoneImage.astro';
+import { SITE, sectionLabel } from '../../data/site';
+
+export async function getStaticPaths() {
+  const articles = await getCollection('articles');
+  return articles.map((article) => ({
+    params: { slug: article.id },
+    props: { article },
+  }));
+}
+
+const { article } = Astro.props;
+const { data } = article;
+const { Content } = await render(article);
+
+/* Read next: the three most recent other pieces, section-mates first. */
+const others = (await getCollection('articles'))
+  .filter((a) => a.id !== article.id)
+  .sort((a, b) => {
+    const sameA = a.data.section === data.section ? 0 : 1;
+    const sameB = b.data.section === data.section ? 0 : 1;
+    if (sameA !== sameB) return sameA - sameB;
+    return b.data.date.valueOf() - a.data.date.valueOf();
+  })
+  .slice(0, 3);
+
+const dateLabel = data.date.toLocaleDateString('en-GB', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+});
+---
+
+<PageShell title={`${data.title} — ${SITE.title}`} description={data.standfirst} route={data.section}>
+  <article>
+    <header class="lede">
+      <div class="caps lede__flag">{data.kicker ?? sectionLabel(data.section)}</div>
+      <h1 class="headline headline--display lede__title">{data.title}</h1>
+      <p class="lede__standfirst">{data.standfirst}</p>
+      <div class="caps caps--micro lede__byline">
+        <span class="lede__author">{data.author}</span>
+        <span aria-hidden="true">/</span>
+        <span>Digest Issue {data.issue}</span>
+        {
+          data.readingTime && (
+            <>
+              <span aria-hidden="true">/</span>
+              <span>{data.readingTime}</span>
+            </>
+          )
+        }
+      </div>
+      <time class="visually-hidden" datetime={data.date.toISOString()}>{dateLabel}</time>
+    </header>
+
+    <figure class="hero dsir-shell">
+      <DuotoneImage
+        src={data.heroImage}
+        alt={data.heroAlt ?? ''}
+        label="PHOTOGRAPH"
+        tone="mono"
+        ratio="16 / 9"
+      />
+      <figcaption class="hero__caption">
+        <span>{data.heroAlt}</span>
+        {data.imageCredit && <span class="caps caps--micro">{data.imageCredit}</span>}
+      </figcaption>
+    </figure>
+
+    <div class="dsir-prose body">
+      <Content />
+
+      {
+        data.tags.length > 0 && (
+          <div class="body__tags">
+            {data.tags.map((tag) => (
+              <span class="tag">{tag}</span>
+            ))}
+          </div>
+        )
+      }
+    </div>
+  </article>
+
+  {
+    others.length > 0 && (
+      <section class="readnext dsir-shell">
+        <div class="caps caps--micro caps--faint readnext__head">Read next</div>
+        <div class="readnext__grid">
+          {others.map((a) => (
+            <a class="card-link readnext__card" href={`/article/${a.id}/`}>
+              <DuotoneImage
+                src={a.data.heroImage}
+                alt={a.data.heroAlt ?? ''}
+                label={(a.data.kicker ?? sectionLabel(a.data.section)).toUpperCase()}
+                tone="mono"
+                ratio="16 / 10"
+              />
+              <div class="caps readnext__flag">{a.data.kicker ?? sectionLabel(a.data.section)}</div>
+              <h3 class="headline headline--sub">{a.data.title}</h3>
+              <span class="readnext__by">{a.data.author}</span>
+            </a>
+          ))}
+        </div>
+      </section>
+    )
+  }
+</PageShell>
+
+<style>
+  .lede {
+    max-width: 38em;
+    margin: 0 auto;
+    padding: 72px 40px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    align-items: center;
+    text-align: center;
+  }
+
+  .lede__flag { color: var(--text-accent); }
+
+  .lede__title { max-width: 24ch; }
+
+  .lede__standfirst {
+    margin: 0;
+    font: var(--type-lead);
+    line-height: 1.28;
+    color: var(--text-muted);
+    max-width: 44ch;
+    text-wrap: pretty;
+  }
+
+  .lede__byline {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+    color: var(--text-faint);
+  }
+
+  .lede__author { color: var(--text-body); }
+
+  .hero { margin: 56px auto 0; }
+
+  .hero__caption {
+    margin-top: 12px;
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    font: var(--type-small);
+    color: var(--text-faint);
+  }
+
+  /* A single serif column at a 38em measure, ragged-right on the web. */
+  .body {
+    max-width: 38em;
+    margin: 0 auto;
+    padding: 64px 40px 0;
+  }
+
+  .body__tags {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: var(--line-hairline);
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-family: var(--font-core);
+  }
+
+  .readnext { margin-top: 96px; }
+
+  .readnext__head { margin-bottom: 24px; }
+
+  .readnext__grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 48px;
+  }
+
+  .readnext__card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .readnext__flag { color: var(--text-muted); }
+
+  .readnext__by {
+    font: var(--type-small);
+    color: var(--text-faint);
+  }
+
+  @media (max-width: 900px) {
+    .readnext__grid { grid-template-columns: 1fr; gap: 40px; }
+  }
+
+  @media (max-width: 760px) {
+    .lede { padding: 44px 20px 0; gap: 18px; }
+    .body { padding: 44px 20px 0; }
+    .hero { margin-top: 36px; }
+    .hero__caption { flex-direction: column; gap: 6px; }
+  }
+</style>

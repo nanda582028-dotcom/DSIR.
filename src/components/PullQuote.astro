@@ -1,0 +1,45 @@
+---
+interface Props {
+  attribution?: string;
+  tone?: 'red' | 'white';
+  class?: string;
+}
+const { attribution, tone = 'red', class: className } = Astro.props;
+---
+
+<blockquote
+  class:list={['pullquote', className]}
+  style={`--pullquote-rule:${tone === 'red' ? 'var(--red)' : 'var(--white)'}`}
+>
+  <p><slot /></p>
+  {attribution && <footer>{attribution}</footer>}
+</blockquote>
+
+<style>
+  .pullquote {
+    margin: 0;
+    padding: var(--space-4) 0;
+    border-top: 2px solid var(--pullquote-rule);
+    border-bottom: var(--line-hairline);
+    break-inside: avoid;
+  }
+
+  .pullquote p {
+    font: var(--type-subhead);
+    font-family: var(--font-light);
+    font-weight: var(--weight-light);
+    letter-spacing: var(--track-head);
+    margin: 0;
+    color: var(--text-body);
+    text-wrap: pretty;
+  }
+
+  .pullquote footer {
+    margin-top: var(--space-3);
+    font-family: var(--font-core);
+    font-size: var(--size-micro);
+    letter-spacing: var(--track-micro);
+    text-transform: uppercase;
+    color: var(--text-accent);
+  }
+</style>

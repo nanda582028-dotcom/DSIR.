@@ -1,0 +1,89 @@
+/* DSIR colour system — three colours, held strictly. Black is the ground, white is the ink, red is the single voice. */
+:root{
+  /* base — black ramp */
+  --black:#000000;
+  --ink-950:#050505;
+  --ink-900:#0B0B0B;
+  --ink-800:#141414;
+  --ink-700:#1D1D1D;
+  --ink-600:#2A2A2A;
+  --ink-500:#3B3B3B;
+
+  /* base — grey ramp (mixtures of the two ends only, never tinted) */
+  --grey-400:#5E5E5E;
+  --grey-300:#8A8A8A;
+  --grey-200:#B4B4B4;
+  --grey-100:#DCDCDC;
+  --grey-050:#F2F2F2;
+  --white:#FFFFFF;
+
+  /* base — red */
+  /* sampled from the DSIR Digest Issue 01 export */
+  --red:#ED1C24;
+  --red-press:#C41219;
+  --red-deep:#780808;
+  --void:#050505;
+  --void-lift:#0B0B0B;
+  --red-wash:rgba(237,28,36,0.14);
+
+  /* pulp accent — cover furniture only (Spring 2023 masthead, distorted feature type). Never body text, never UI. */
+  --pulp-yellow:#F5C518;
+  --pulp-orange:#F58220;
+  --paper:#F2EDE4;
+  --paper-warm:#F7F3EA;
+  --paper-cool:#FAFAF8;
+
+  /* semantic — surfaces */
+  --bg:var(--black);
+  --bg-subtle:var(--ink-900);
+  --surface-card:var(--ink-900);
+  --surface-raised:var(--ink-800);
+  --surface-inverse:var(--white);
+  --surface-accent:var(--red);
+
+  /* semantic — text */
+  --text-body:var(--white);
+  --text-muted:var(--grey-300);
+  --text-faint:var(--grey-400);
+  --text-accent:var(--red);
+  --text-inverse:var(--black);
+  --text-on-accent:var(--white);
+
+  /* semantic — lines */
+  --border:rgba(255,255,255,0.16);
+  --border-strong:rgba(255,255,255,0.34);
+  --border-accent:var(--red);
+  --rule:1px solid var(--border);
+  --focus-ring:var(--red);
+
+  /* semantic — state */
+  --state-hover-veil:rgba(255,255,255,0.08);
+  --state-press-veil:rgba(255,255,255,0.16);
+  --state-disabled-text:var(--grey-400);
+
+  /* the only status colours: red carries every alert, white every confirmation */
+  --surface-pulp:var(--pulp-yellow);
+  --surface-void:var(--void);
+  --status-critical:var(--red);
+  --status-ok:var(--white);
+}
+
+/* Inverted scope: white sheets. Used for print-like pages and pull-out sections. */
+.dsir-invert{
+  --bg:var(--white);
+  --bg-subtle:var(--paper-cool);
+  --bg-paper:var(--paper-warm);
+  --surface-card:var(--white);
+  --surface-raised:var(--grey-050);
+  --surface-inverse:var(--black);
+  --text-body:var(--black);
+  --text-muted:var(--grey-400);
+  --text-faint:var(--grey-300);
+  --text-inverse:var(--white);
+  --border:rgba(0,0,0,0.14);
+  --border-strong:rgba(0,0,0,0.4);
+  --text-accent:var(--red-press);
+  --state-hover-veil:rgba(0,0,0,0.06);
+  --state-press-veil:rgba(0,0,0,0.12);
+  --status-ok:var(--black);
+}

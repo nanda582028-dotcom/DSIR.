@@ -1,0 +1,10 @@
+/* Minimal element defaults so specimen cards and kits share a ground. */
+html{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+body{margin:0;background:var(--bg);color:var(--text-body);font:var(--type-body);letter-spacing:var(--track-body)}
+::selection{background:var(--red);color:var(--white)}
+a{color:var(--text-body);text-decoration:none;transition:var(--transition-state)}
+a:hover{color:var(--text-accent)}
+/* Body-copy links carry the rule; navigation and furniture do not. */
+p a,li a,.dsir-prose a{border-bottom:1px solid var(--text-accent)}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+hr{border:0;border-top:var(--line-hairline);margin:var(--space-6) 0}

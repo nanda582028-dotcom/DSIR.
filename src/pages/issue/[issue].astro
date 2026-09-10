@@ -1,0 +1,185 @@
+---
+import { getCollection } from 'astro:content';
+import PageShell from '../../components/PageShell.astro';
+import ArticleCard from '../../components/ArticleCard.astro';
+import DuotoneImage from '../../components/DuotoneImage.astro';
+import { SITE, sectionLabel } from '../../data/site';
+
+export async function getStaticPaths() {
+  const articles = await getCollection('articles');
+  const issues = [...new Set(articles.map((a) => a.data.issue))];
+  return issues.map((issue) => ({ params: { issue } }));
+}
+
+const { issue } = Astro.params;
+
+const all = (await getCollection('articles'))
+  .filter((a) => a.data.issue === issue)
+  .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
+
+const opener = all.find((a) => a.data.featured) ?? all[0];
+const rest = all.filter((a) => a.id !== opener?.id);
+
+/* The three-column grid takes the first six; the remainder run as the ruled
+   "Also in Issue 01" list beneath. */
+const grid = rest.slice(0, 6);
+const also = rest.slice(6);
+---
+
+<PageShell
+  title={`Digest Issue ${issue} — ${SITE.title}`}
+  description={opener?.data.standfirst}
+  route="home"
+  over={true}
+>
+  {
+    opener && (
+      <section class="opener">
+        <a class="opener__link" href={`/article/${opener.id}/`}>
+          <div class="opener__frame">
+            <DuotoneImage
+              src={opener.data.heroImage}
+              alt={opener.data.heroAlt ?? ''}
+              label=""
+              tone="mono"
+              ratio="auto"
+              fill={true}
+            />
+            <div class="opener__scrim" aria-hidden="true" />
+            <div class="opener__type">
+              <div class="caps caps--micro opener__flag">
+                {opener.data.kicker ?? `${SITE.currentIssueLabel} — ${sectionLabel(opener.data.section)}`}
+              </div>
+              <h1 class="headline headline--display headline--inverse opener__headline">
+                {opener.data.title}
+              </h1>
+              <p class="opener__deck">{opener.data.standfirst}</p>
+            </div>
+          </div>
+        </a>
+      </section>
+    )
+  }
+
+  <div class="dsir-shell issue">
+    <section class="issue__grid">
+      {grid.map((article) => <ArticleCard article={article} />)}
+    </section>
+
+    {
+      also.length > 0 && (
+        <section class="issue__also">
+          <div class="issue__alsohead">
+            <span class="caps caps--micro caps--accent">Also in Issue {issue}</span>
+            <a class="caps caps--micro caps--accent" href="/archive/">
+              All issues
+            </a>
+          </div>
+          {also.map((a) => (
+            <a class="card-link issue__row" href={`/article/${a.id}/`}>
+              <span class="caps caps--micro caps--faint">
+                {a.data.kicker ?? sectionLabel(a.data.section)}
+              </span>
+              <h3 class="headline headline--sub">{a.data.title}</h3>
+              <span class="issue__rowby">{a.data.author}</span>
+            </a>
+          ))}
+        </section>
+      )
+    }
+  </div>
+</PageShell>
+
+<style>
+  .opener { position: relative; background: var(--bg-paper); }
+
+  .opener__link { display: block; color: inherit; }
+
+  .opener__frame {
+    position: relative;
+    height: 100vh;
+    min-height: 620px;
+    overflow: hidden;
+  }
+
+  /* Bottom-up scrim so the type survives whatever the photograph does. */
+  .opener__scrim {
+    position: absolute;
+    inset: 0;
+    background: var(--veil-photo);
+    z-index: 3;
+  }
+
+  .opener__type {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+    text-align: center;
+    padding: 0 40px;
+    z-index: 4;
+  }
+
+  .opener__flag { color: var(--red); }
+
+  .opener__headline { max-width: 24ch; }
+
+  .opener__deck {
+    font: var(--type-lead);
+    color: rgba(255, 255, 255, 0.92);
+    margin: 0;
+    max-width: 46ch;
+    line-height: 1.45;
+  }
+
+  .opener__link:hover .opener__headline { color: var(--white); }
+
+  .issue { padding-top: 72px; }
+
+  .issue__grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 72px 48px;
+  }
+
+  .issue__also {
+    margin-top: 96px;
+    padding-top: 40px;
+    border-top: var(--line-accent);
+  }
+
+  .issue__alsohead {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 8px;
+  }
+
+  .issue__row {
+    display: grid;
+    grid-template-columns: 170px 1fr auto;
+    gap: 32px;
+    align-items: baseline;
+    padding: 22px 0;
+    border-bottom: var(--line-hairline);
+  }
+
+  .issue__rowby {
+    font: var(--type-small);
+    color: var(--text-muted);
+  }
+
+  @media (max-width: 1080px) {
+    .issue__grid { grid-template-columns: repeat(2, 1fr); gap: 56px 36px; }
+  }
+
+  @media (max-width: 760px) {
+    .issue { padding-top: 48px; }
+    .issue__grid { grid-template-columns: 1fr; gap: 48px; }
+    .issue__row { grid-template-columns: 1fr; gap: 8px; }
+    .opener__frame { height: 78vh; min-height: 460px; }
+  }
+</style>

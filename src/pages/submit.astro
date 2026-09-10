@@ -1,0 +1,452 @@
+---
+import PageShell from '../components/PageShell.astro';
+import PullQuote from '../components/PullQuote.astro';
+import { SITE, GENRES } from '../data/site';
+
+/* Set PUBLIC_FORM_ENDPOINT in .env to the Formspree (or Netlify Forms) endpoint
+   that mails the editors. No server of our own is involved. */
+const endpoint = import.meta.env.PUBLIC_FORM_ENDPOINT ?? '';
+---
+
+<PageShell title={`Submit — ${SITE.title}`} route="submit">
+  <div class="dsir-shell dsir-shell--narrow sub">
+    <div class="sub__cols">
+      <div class="sub__main">
+        <div class="caps caps--accent">Contribute</div>
+        <h1 class="headline headline--display">Write for the Review</h1>
+        <p class="standfirst">
+          Tell us who you are, what house and form you're in, and what you want to write about.
+          We'll find you the format.
+        </p>
+        <hr class="rule rule--accent" />
+
+        <form class="form" id="pitch" novalidate data-endpoint={endpoint}>
+          <div class="form__grid">
+            <label class="field">
+              <span class="field__label">Name</span>
+              <input class="field__input" name="name" type="text" placeholder="Aadidev Basu" required />
+              <span class="field__error" data-error-for="name" hidden></span>
+            </label>
+
+            <label class="field">
+              <span class="field__label">House</span>
+              <input class="field__input" name="house" type="text" placeholder="e.g. Oberoi" required />
+              <span class="field__error" data-error-for="house" hidden></span>
+            </label>
+
+            <label class="field">
+              <span class="field__label">Form</span>
+              <input class="field__input" name="form" type="text" placeholder="e.g. Form 5" required />
+              <span class="field__error" data-error-for="form" hidden></span>
+            </label>
+
+            <label class="field">
+              <span class="field__label">Genre</span>
+              <div class="field__selectwrap">
+                <select class="field__input field__select" name="genre" required>
+                  {GENRES.map((g) => <option value={g}>{g}</option>)}
+                </select>
+                <span class="field__caret" aria-hidden="true">▼</span>
+              </div>
+              <span class="field__error" data-error-for="genre" hidden></span>
+            </label>
+
+            <label class="field field--wide">
+              <span class="field__label">Article title</span>
+              <input class="field__input" name="title" type="text" placeholder="Working title" required />
+              <span class="field__error" data-error-for="title" hidden></span>
+            </label>
+
+            <label class="field field--wide">
+              <span class="field__label">Idea</span>
+              <textarea
+                class="field__textarea"
+                name="idea"
+                rows="5"
+                placeholder="Two or three sentences. Open on the fact that made you want to write it."
+                required></textarea>
+              <span class="field__error" data-error-for="idea" hidden></span>
+            </label>
+
+            <div class="field field--wide">
+              <label class="check">
+                <input class="check__input" type="checkbox" name="original" required />
+                <span class="check__box" aria-hidden="true"></span>
+                <span class="check__label">This is my own writing, not generated</span>
+              </label>
+              <span class="field__error" data-error-for="original" hidden></span>
+            </div>
+          </div>
+
+          <div class="form__actions">
+            <button class="btn btn--primary" type="submit">Send pitch</button>
+            <a class="btn btn--ghost" href="/about/">Read the guidelines</a>
+          </div>
+
+          <p class="form__status" id="form-status" role="status" hidden></p>
+        </form>
+
+        <div class="sub__done" id="pitch-done" hidden>
+          <h2 class="headline headline--head">Pitch received.</h2>
+          <p class="sub__donebody">
+            Thank you. An editor will come back to you about the format and the deadline.
+          </p>
+          <button class="btn btn--ghost" type="button" id="pitch-again">Send another</button>
+        </div>
+      </div>
+
+      <aside class="sub__aside">
+        <div class="caps caps--accent">What we want</div>
+        <ul class="sub__list">
+          <li>Reviews, essays, cultural analysis, interviews, columns, retrospectives.</li>
+          <li>600–1,200 words. Open on a concrete fact with a date.</li>
+          <li>Something you actually watched, read or heard.</li>
+        </ul>
+        <PullQuote attribution="Aadidev Basu, Editor-in-Chief">
+          We are not interested in the opinion of a language model on a film it never actually saw
+          itself.
+        </PullQuote>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('pitch') as HTMLFormElement;
+    const done = document.getElementById('pitch-done') as HTMLElement;
+    const again = document.getElementById('pitch-again') as HTMLButtonElement;
+    const status = document.getElementById('form-status') as HTMLElement;
+
+    const MESSAGES: Record<string, string> = {
+      name: 'Tell us your name.',
+      house: 'Which house?',
+      form: 'Which form?',
+      genre: 'Pick a genre.',
+      title: 'Give it a working title.',
+      idea: 'Two or three sentences will do.',
+      original: 'We need this confirmed before we can read it.',
+    };
+
+    function showError(field: string, message: string | null) {
+      const slot = form.querySelector<HTMLElement>(`[data-error-for="${field}"]`);
+      const input = form.querySelector<HTMLElement>(`[name="${field}"]`);
+      if (slot) {
+        slot.textContent = message ?? '';
+        slot.hidden = !message;
+      }
+      input?.classList.toggle('is-invalid', !!message);
+      input?.setAttribute('aria-invalid', message ? 'true' : 'false');
+    }
+
+    function validate(): boolean {
+      let first: HTMLElement | null = null;
+      let ok = true;
+
+      for (const field of Object.keys(MESSAGES)) {
+        const input = form.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
+          `[name="${field}"]`,
+        );
+        if (!input) continue;
+        const empty =
+          input instanceof HTMLInputElement && input.type === 'checkbox'
+            ? !input.checked
+            : !input.value.trim();
+        showError(field, empty ? MESSAGES[field]! : null);
+        if (empty) {
+          ok = false;
+          if (!first) first = input;
+        }
+      }
+
+      first?.focus();
+      return ok;
+    }
+
+    form.addEventListener('input', (e) => {
+      const el = e.target as HTMLElement & { name?: string };
+      if (el?.name && el.classList.contains('is-invalid')) showError(el.name, null);
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      status.hidden = true;
+      if (!validate()) return;
+
+      const endpoint = form.dataset.endpoint;
+      const button = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+
+      if (!endpoint) {
+        /* No form service configured yet — say so plainly rather than pretending
+           the pitch was sent. */
+        status.textContent =
+          'This form is not connected to a mail service yet. Set PUBLIC_FORM_ENDPOINT before launch.';
+        status.hidden = false;
+        return;
+      }
+
+      button.disabled = true;
+      button.textContent = 'Sending…';
+
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { Accept: 'application/json' },
+          body: new FormData(form),
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        form.hidden = true;
+        done.hidden = false;
+        done.scrollIntoView({ block: 'center' });
+      } catch (err) {
+        status.textContent = 'That did not send. Try again, or email the editors directly.';
+        status.hidden = false;
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Send pitch';
+      }
+    });
+
+    again.addEventListener('click', () => {
+      form.reset();
+      form.hidden = false;
+      done.hidden = true;
+      form.querySelector<HTMLInputElement>('[name="name"]')?.focus();
+    });
+  </script>
+</PageShell>
+
+<style>
+  .sub { padding-top: 64px; }
+
+  .sub__cols {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 56px;
+    align-items: start;
+  }
+
+  .sub__main {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .form { display: flex; flex-direction: column; gap: 32px; }
+
+  .form__grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 26px 28px;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .field--wide { grid-column: span 2; }
+
+  .field__label {
+    font: var(--type-micro);
+    letter-spacing: var(--track-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .field__input {
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--border-strong);
+    border-radius: 0;
+    padding: 10px 0;
+    font: var(--type-body);
+    font-family: var(--font-core);
+    color: var(--text-body);
+    width: 100%;
+    transition: var(--transition-state);
+  }
+
+  .field__input:focus { border-bottom-color: var(--text-body); }
+  .field__input.is-invalid { border-bottom-color: var(--red); }
+
+  .field__selectwrap { position: relative; }
+  .field__select { appearance: none; padding-right: 24px; }
+
+  .field__caret {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: var(--red);
+    font-size: 11px;
+  }
+
+  .field__textarea {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 0;
+    padding: var(--space-3);
+    font: var(--type-body);
+    font-family: var(--font-core);
+    color: var(--text-body);
+    resize: vertical;
+    width: 100%;
+    transition: var(--transition-state);
+  }
+
+  .field__textarea:focus { border-color: var(--text-body); }
+  .field__textarea.is-invalid { border-color: var(--red); }
+
+  /* Inline errors in red, no icons. */
+  .field__error {
+    font: var(--type-small);
+    color: var(--red);
+  }
+
+  .check {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    cursor: pointer;
+  }
+
+  .check__input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .check__box {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    border: 1px solid var(--border-strong);
+    background: transparent;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition-state);
+  }
+
+  .check__input:checked + .check__box {
+    border-color: var(--red);
+    background: var(--red);
+  }
+
+  .check__input:checked + .check__box::after {
+    content: '';
+    width: 6px;
+    height: 10px;
+    border-right: 2px solid var(--white);
+    border-bottom: 2px solid var(--white);
+    transform: rotate(45deg) translate(-1px, -1px);
+  }
+
+  .check__input:focus-visible + .check__box {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  .check__label {
+    font: var(--type-small);
+    color: var(--text-body);
+  }
+
+  .form__actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    font: var(--type-label);
+    letter-spacing: var(--track-label);
+    text-transform: uppercase;
+    border-radius: var(--radius-none);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    transition: var(--transition-state);
+    font-family: var(--font-core);
+    white-space: nowrap;
+    padding: 12px 22px;
+  }
+
+  .btn--primary {
+    background: var(--red);
+    color: var(--text-on-accent);
+    border: 1px solid var(--red);
+  }
+
+  .btn--primary:hover {
+    background: var(--red-press);
+    border-color: var(--red-press);
+    color: var(--white);
+  }
+
+  .btn--primary:active { transform: translateY(1px); }
+  .btn--primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn--ghost {
+    background: transparent;
+    color: var(--text-body);
+    border: 1px solid transparent;
+    padding: 8px 0;
+  }
+
+  .btn--ghost:hover { color: var(--text-accent); }
+
+  .form__status {
+    margin: 0;
+    font: var(--type-small);
+    color: var(--red);
+  }
+
+  .sub__done {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    align-items: flex-start;
+    padding-top: 8px;
+  }
+
+  .sub__donebody {
+    margin: 0;
+    font: var(--type-body);
+    color: var(--text-muted);
+    max-width: 46ch;
+  }
+
+  .sub__aside {
+    border: var(--line-hairline);
+    padding: 26px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .sub__list {
+    margin: 0;
+    padding-left: 18px;
+    font: var(--type-small);
+    color: var(--text-muted);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  @media (max-width: 900px) {
+    .sub__cols { grid-template-columns: 1fr; gap: 44px; }
+  }
+
+  @media (max-width: 560px) {
+    .sub { padding-top: 40px; }
+    .form__grid { grid-template-columns: 1fr; }
+    .field--wide { grid-column: span 1; }
+  }
+</style>

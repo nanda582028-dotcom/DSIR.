@@ -1,0 +1,162 @@
+---
+import { SITE } from '../data/site';
+
+/* Centred masthead bar: utilities either side, the wordmark centred, one hairline
+   beneath, the section nav, then a second hairline. On Home only it sits
+   transparent over the opening photograph. */
+interface Props {
+  route?: string;
+  over?: boolean;
+}
+const { route = '', over = false } = Astro.props;
+
+const issueHref = `/issue/${SITE.currentIssue}/`;
+
+const NAV: Array<[label: string, route: string, href: string]> = [
+  ['Current Issue', 'home', issueHref],
+  ['Film', 'film', '/section/film/'],
+  ['Culture', 'culture', '/section/culture/'],
+  ['Music', 'music', '/section/music/'],
+  ['Archive', 'archive', '/archive/'],
+  ['About', 'about', '/about/'],
+];
+---
+
+<header class:list={['site-header', over && 'site-header--over']}>
+  <div class="site-header__bar dsir-shell">
+    <div class="site-header__utils">
+      <a class="caps" href="/archive/">Menu</a>
+      <span class="site-header__slash">/</span>
+      <a class="caps" href="/archive/">Search</a>
+    </div>
+
+    <a class="site-header__wordmark" href={issueHref} aria-label={`${SITE.title} — current issue`}>
+      DSIR.
+    </a>
+
+    <div class="site-header__utils site-header__utils--end">
+      <a class="caps" href="/submit/">Submit</a>
+      <span class="site-header__slash">/</span>
+      <a class="caps" href="/submit/">Newsletter</a>
+    </div>
+  </div>
+
+  <div class="site-header__navwrap">
+    <nav class="site-header__nav dsir-shell" aria-label="Sections">
+      {
+        NAV.map(([label, r, href]) => (
+          <a
+            class:list={['caps', 'caps--micro', 'site-header__navlink', route === r && 'is-current']}
+            href={href}
+            aria-current={route === r ? 'page' : undefined}
+          >
+            {label}
+          </a>
+        ))
+      }
+    </nav>
+  </div>
+</header>
+
+<style>
+  .site-header {
+    position: sticky;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 40;
+    background: var(--bg);
+    border-bottom: var(--line-hairline);
+
+    --header-ink: var(--text-body);
+    --header-dim: var(--text-muted);
+    --header-hair: var(--border);
+  }
+
+  /* Home only: the header rides transparent over the opening photograph, so its
+     ink flips to white. This block must follow the base one — both are a single
+     class, so the later declaration is the one that lands. */
+  .site-header--over {
+    position: absolute;
+    background: transparent;
+    border-bottom-color: transparent;
+
+    --header-ink: var(--white);
+    --header-dim: rgba(255, 255, 255, 0.72);
+    --header-hair: rgba(255, 255, 255, 0.28);
+  }
+
+  .site-header__bar {
+    padding-block: 22px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 32px;
+  }
+
+  .site-header__utils {
+    display: flex;
+    gap: 18px;
+    align-items: center;
+  }
+
+  .site-header__utils--end { justify-content: flex-end; }
+
+  .site-header__utils a { color: var(--header-ink); }
+  .site-header__utils a:hover { color: var(--text-accent); }
+
+  .site-header--over .site-header__utils a:hover { color: var(--red); }
+
+  .site-header__slash { color: var(--header-dim); }
+
+  .site-header__wordmark {
+    justify-self: center;
+    font-family: var(--font-light);
+    font-weight: var(--weight-regular);
+    font-size: 38px;
+    line-height: 1;
+    letter-spacing: -0.01em;
+    color: var(--header-ink);
+  }
+
+  .site-header__navwrap { border-top: 1px solid var(--header-hair); }
+
+  .site-header__nav {
+    padding-block: 12px;
+    display: flex;
+    gap: 30px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .site-header__navlink {
+    color: var(--header-dim);
+    border-bottom: 1px solid transparent;
+    padding-bottom: 3px;
+  }
+
+  .site-header__navlink:hover { color: var(--text-accent); }
+  .site-header--over .site-header__navlink:hover { color: var(--white); }
+
+  .site-header__navlink.is-current {
+    color: var(--text-accent);
+    border-bottom-color: var(--red);
+  }
+
+  .site-header--over .site-header__navlink.is-current {
+    color: var(--white);
+    border-bottom-color: var(--red);
+  }
+
+  @media (max-width: 760px) {
+    .site-header__bar {
+      grid-template-columns: 1fr;
+      justify-items: center;
+      gap: 14px;
+      padding-block: 16px;
+    }
+    .site-header__utils--end { justify-content: center; }
+    .site-header__wordmark { font-size: 30px; }
+    .site-header__nav { gap: 18px; }
+  }
+</style>
