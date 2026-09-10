@@ -77,23 +77,43 @@ the section list, back issues, the genre options — lives in `src/data/site.ts`
 
 ## The intro
 
-`src/scripts/intro.ts` is the scroll-driven sequence: a 900vh track holding one sticky stage, with a
-galaxy phase, four grain fields sampled from real photographs of awards, and seven text overlays.
+`src/scripts/intro.ts` is the scroll-driven sequence: a 900vh track holding one sticky stage, with
+seven text overlays over one canvas. It has three phases.
+
+**Phase A (p 0 → ~0.34) — the galaxy becomes a vinyl record.** 4200 particles in a three-arm
+logarithmic spiral collapse into concentric grooves: the radius quantises onto 26 rings, the arm
+angle slides to a uniform ring angle, differential rotation gives way to rigid spin, the disc tilts
+up, and grains inside the label radius turn red. A record surface resolves underneath — body,
+grooves, specular sweep, label, spindle hole, rim — then the whole thing blows past the frame.
+
+**Phase B (p 0.30 → 0.965) — the section objects.** Four grain fields sampled from real photographs
+of awards, travelling in depth. Windows overlap so a hand-off never shows empty black. Culture has no
+trophy photograph, so its grain is sampled off a drawn television silhouette in the same way.
+
+**Phase C — the closing sheet spiral.** Fires on click, not on scroll. Sixteen sheets travel one
+shared spiral path out of a vanishing point, widening and curling as they near the lens, until the
+last of them fills the frame and the issue opens. One shot, 1700ms, not a loop.
 
 Every constant is ported from the handoff's motion specification and should be treated as fixed —
-the damped scroll follow, the beat windows, the depth maths, the sampling threshold, the gold ramp.
-Three things are worth knowing before editing it:
+the damped scroll follow, the vinyl morph, the beat windows, the depth maths, the sampling
+threshold, the gold ramp, the spiral path. Four things are worth knowing before editing it:
 
 - Elements are looked up by attribute each frame, never held as long-lived refs.
 - Exactly one animation loop runs per page; a new claim cancels the previous one, and the draw call
   sits inside a `try` so one bad frame cannot break the frame chain.
+- `requestAnimationFrame` can be throttled to nothing in a backgrounded or offscreen frame, which
+  would leave the intro stuck on one faint frame. A 200ms timer draws as well, and the damping
+  integrates real elapsed time, so sparse frames catch up.
 - Under `prefers-reduced-motion` it renders **one** static frame and redraws on scroll. No loop is
-  ever started, and the restart heartbeat is disabled — the prototype restarted the loop this way.
+  ever started, the restart timer is disabled, and the button simply navigates rather than firing
+  the flight — the prototype restarted the loop through its heartbeat.
 
-Every word of the intro is real text in the DOM, so the page reads without canvas or JavaScript.
+Every word of the intro is real text in the DOM, so the page reads without canvas or JavaScript. The
+"Read Issue 01" button is a real `<a href>`, so with JS off it navigates like any link.
 
 The intro plays once per reader: it sets `dsir:seen-intro` in `localStorage` and returning readers
 are redirected to the current issue. `?replay` forces it; `?skip` skips it and records the flag.
+Skip goes straight to the issue; the button fires the sheet spiral first.
 
 ## The submissions form
 
@@ -131,9 +151,12 @@ visible 2px red focus outline at 2px offset that is never removed. All motion co
    licensed or replaced. A clean image samples better.
 5. **An Emmy photograph.** The Culture beat uses a drawn television silhouette because no trophy
    image was available. An Emmy photograph drops straight into the same sampler.
-6. **The editorial serif.** Newsreader stands in for a licensed transitional face. Swapping it is a
+6. **Cover imagery for the closing spiral.** The sixteen flying sheets share eight typographic
+   plates generated in code, because no cover photography exists. Real covers drop straight into the
+   same flight in place of them; the plate specs live in `buildPlates()` in `src/scripts/intro.ts`.
+7. **The editorial serif.** Newsreader stands in for a licensed transitional face. Swapping it is a
    one-line change in `src/styles/tokens/typography.css`.
-7. **Sections vs. the footer.** The handoff's content model lists five sections (film, music,
+8. **Sections vs. the footer.** The handoff's content model lists five sections (film, music,
    literature, culture, build-it) while the design system's footer listed "Sport" as a sixth. The five
    are canonical here and the footer renders from that data; the two "Sport" and "In Memory Of"
    pieces carry those labels as kickers. Worth a decision either way.

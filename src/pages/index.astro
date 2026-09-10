@@ -45,7 +45,7 @@ const BEATS = ['film', 'music', 'literature', 'culture'].map((slug) => {
       </div>
     </div>
 
-    <div class="intro__track" data-intro="track">
+    <div class="intro__track" data-intro="track" data-issue-href={issueHref}>
       <div class="intro__stage">
         <canvas class="intro__canvas" data-intro="canvas" aria-hidden="true"></canvas>
 
@@ -71,7 +71,7 @@ const BEATS = ['film', 'music', 'literature', 'culture'].map((slug) => {
         <div class="intro__overlay intro__overlay--centre" data-intro="enter">
           <span class="intro__kicker">Issue {SITE.currentIssue} · {SITE.currentIssueDate}</span>
           <h2 class="intro__enter">Enter the Review</h2>
-          <a class="intro__button" href={`${issueHref}?from=intro`} data-intro-skip>
+          <a class="intro__button" href={`${issueHref}?from=intro`} data-intro-enter>
             Read Issue {SITE.currentIssue} <span aria-hidden="true">→</span>
           </a>
         </div>
@@ -84,18 +84,26 @@ const BEATS = ['film', 'music', 'literature', 'culture'].map((slug) => {
   <script>
     import { startIntro } from '../scripts/intro';
 
-    /* Mark the intro as seen the moment the reader leaves it for the issue. */
+    const seen = () => {
+      try {
+        window.localStorage.setItem('dsir:seen-intro', '1');
+      } catch (e) {
+        /* private mode or blocked storage: nothing to record */
+      }
+    };
+
+    /* Skip goes straight to the issue. */
     document.querySelectorAll('[data-intro-skip]').forEach((el) => {
-      el.addEventListener('click', () => {
-        try {
-          window.localStorage.setItem('dsir:seen-intro', '1');
-        } catch (e) {
-          /* nothing to do */
-        }
-      });
+      el.addEventListener('click', seen);
     });
 
-    startIntro();
+    /* The button fires the closing sheet spiral, which navigates when it lands. */
+    const track = document.querySelector('[data-intro="track"]');
+
+    startIntro({
+      issueHref: track?.getAttribute('data-issue-href') ?? '/',
+      onEnter: seen,
+    });
   </script>
 </Base>
 
