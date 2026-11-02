@@ -71,6 +71,8 @@ input[type=range]::-moz-range-thumb{width:10px;height:18px;background:var(--ambe
 
 /* ---------- HUD ---------- */
 #hud{z-index:5}
+#hud.dim #vitals,#hud.dim #compass,#hud.dim #objective,#hud.dim #toast,#hud.dim #markers,#hud.dim #hint{opacity:.12;transition:opacity .5s}
+#hud #vitals,#hud #compass,#hud #objective{transition:opacity .5s}
 #compass{position:absolute;top:18px;left:50%;transform:translateX(-50%);width:560px;height:46px}
 #compass canvas{width:560px;height:46px;display:block}
 #objective{position:absolute;top:24px;left:32px;max-width:380px}
@@ -3625,9 +3627,10 @@ Object.assign(World.prototype, {
       Be.box(lx, IH - 0.1, lz, lz > -236 ? 0.2 : 3.0, 0.08, lz > -236 ? 1.6 : 0.2, colMul(0xdfefff, 2.2), { faces: F_ALL });
       this.glows.add(lx, IH - 0.2, lz, colMul(0xdfefff, 0.3), 1.4, lx === -118 ? 3 : 0);
     }
-    this.lights.add({ x: -138, y: 2.6, z: -240.5, color: col(0xdfefff), intensity: 9, range: 13, type: 'interior', priority: 5, exposeR: 7 });
-    this.lights.add({ x: -122, y: 2.6, z: -240.5, color: col(0xdfefff), intensity: 9, range: 13, type: 'interior', priority: 5, exposeR: 7, flicker: true });
-    this.lights.add({ x: -130, y: 2.6, z: -232, color: col(0xdfefff), intensity: 4, range: 7, type: 'interior', priority: 4, exposeR: 2.5 });
+    this.lights.add({ x: -140, y: 2.7, z: -240.5, color: col(0xe4f0ff), intensity: 20, range: 16, type: 'interior', priority: 6, exposeR: 7 });
+    this.lights.add({ x: -121, y: 2.7, z: -240.5, color: col(0xe4f0ff), intensity: 18, range: 16, type: 'interior', priority: 6, exposeR: 7, flicker: true });
+    this.lights.add({ x: -130, y: 2.6, z: -232, color: col(0xe4f0ff), intensity: 9, range: 9, type: 'interior', priority: 5, exposeR: 2.5 });
+    this.pools.add(-140, 0.08, -240.5, 6.5, col(0xdfefff), 0.16); this.pools.add(-121, 0.08, -240.5, 6.5, col(0xdfefff), 0.16);
     // conditioning chair
     const cx = -130, cz = -241.2, metal = col(0x3c4246), leather = col(0x2e2622);
     Bp.box(cx, 0, cz, 0.8, 0.5, 0.8, metal, { faces: F_ALL }); Bp.box(cx, 0.5, cz, 0.75, 0.12, 0.8, leather, { faces: F_ALL });
@@ -7439,7 +7442,7 @@ class Game {
   }
   continueGame() {
     if (!/[?&]mute=1/.test(location.search)) G.audio.init(); G.ui.applySettings(); G.audio.uiClick();
-    if (G.narrative && G.narrative.loadSave()) this.startPlay(); else this.beginNewGame();
+    if (G.narrative && G.narrative.loadSave()) { this.startPlay(); this.fadeIn(); } else this.beginNewGame();
   }
   sandboxStart() {
     const L = G.world.LOC;
@@ -7476,6 +7479,7 @@ class Game {
   onHidden() { if (this.state === 'play') this.pause(true); G.audio.suspend(); }
   onAction(a) {
     if (a === 'fps') { this.fpsOn = !this.fpsOn; G.ui.show('fps', this.fpsOn); return; }
+    if (G.ui.isShown('doc') && (a === 'interact' || a === 'attack' || a === 'pause')) { this.closeDocument(); return; }
     if (a === 'pause') {
       if (this.state === 'play' && G.ui.isShown('journal')) { this.toggleJournal(); return; }
       if (this.state === 'play' && G.ui.isShown('doc')) { this.closeDocument(); return; }
@@ -7484,7 +7488,6 @@ class Game {
       return;
     }
     if (a === 'journal' && (this.state === 'play' || (this.state === 'paused' && G.ui.isShown('journal')))) { this.toggleJournal(); return; }
-    if (this.state === 'play' && G.ui.isShown('doc') && (a === 'interact' || a === 'attack')) { this.closeDocument(); return; }
   }
   toggleJournal() {
     if (!G.narrative) return;
@@ -7494,7 +7497,8 @@ class Game {
   }
   closeDocument() { if (G.narrative) G.narrative.closeDocument(); }
   onPlayerDeath() { if (G.narrative) G.narrative.onPlayerDeath(); }
-  retryCheckpoint() { G.audio.uiClick(); G.ui.show('gameover', false); G.ui.show('pause', false); if (G.narrative) G.narrative.loadCheckpoint(); this.startPlay(); }
+  retryCheckpoint() { G.audio.uiClick(); G.ui.show('gameover', false); G.ui.show('pause', false); if (G.narrative) G.narrative.loadCheckpoint(); this.startPlay(); this.fadeIn(); }
+  fadeIn() { this.fade.black = 1; this.fade.targetBlack = 0; this.fade.speed = 1.1; this.fade.white = 0; this.fade.targetWhite = 0; }
   quitToTitle() { G.audio.uiClick(); G.ui.cancelEnding(); if (G.narrative) G.narrative.stopAll(); this.fade.white = 0; this.fade.targetWhite = 0; G.ui.show('ending', false); this.toTitle(); }
   hitStop(t) { this.hitStopT = Math.max(this.hitStopT, t); }
   slowMo(t, scale) { this.slowT = Math.max(this.slowT, t); this.slowScale = scale; }
@@ -7596,7 +7600,10 @@ class Game {
     const p = G.player;
     const low = this.state === 'play' || this.state === 'paused' ? clamp01((35 - p.health) / 35) : 0;
     const hurt = p.simTime - p.lastHurtT < 0.6 ? 1 - (p.simTime - p.lastHurtT) / 0.6 : 0;
-    u.uDamage.value = damp(u.uDamage.value, Math.max(low * 0.75, hurt * 0.9), 10, realDt);
+    const beat = low > 0 ? 0.55 + 0.45 * Math.pow(Math.max(0, Math.sin(u.uTime.value * 5.2)), 6) : 1;
+    u.uDamage.value = damp(u.uDamage.value, Math.max(low * 0.95 * beat, hurt * 0.9), 10, realDt);
+    const dimHud = !!(G.narrative && G.narrative.fragScene) || G.ui.isShown('doc');
+    if (this._dimHud !== dimHud) { this._dimHud = dimHud; $('hud').classList.toggle('dim', dimHud); }
     this.desat = damp(this.desat, Math.max(this.desatTarget, low * 0.55), 4, realDt);
     u.uDesat.value = this.desat;
     u.uCold.value = this.state === 'play' ? clamp01((CONFIG.heat.coldThreshold - p.heat) / CONFIG.heat.coldThreshold) : 0;
