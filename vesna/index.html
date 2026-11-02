@@ -2855,6 +2855,12 @@ class World {
     if (G.footprints) G.footprints.uniforms.uTime.value = this.time;
   }
   windAt(x, z) { return smoothstep(LAYOUT.windZ + 6, LAYOUT.windZ - 12, z); }
+  // Fragment spots are reserved so seeded props never sit on top of them
+  reserved(x, z, r = 3.2) {
+    if (typeof FRAGMENTS === 'undefined') return false;
+    for (const f of FRAGMENTS) if (f.pos && Math.hypot(f.pos[0] - x, f.pos[1] - z) < r) return true;
+    return false;
+  }
   isIndoors(x, y, z) {
     for (const b of this.indoorBoxes) if (x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ && y < b.maxY && y > b.minY - 0.5) return true;
     return false;
@@ -2971,7 +2977,7 @@ Object.assign(World.prototype, {
     }
     // courtyard furniture
     const cx = (ix0 + ix1) / 2, cz = (iz0 + iz1) / 2;
-    const free = (x, z) => !buildings.some(([a, b, c, d]) => x > a - 1.5 && x < c + 1.5 && z > b - 1.5 && z < d + 1.5);
+    const free = (x, z) => !this.reserved(x, z, 4) && !buildings.some(([a, b, c, d]) => x > a - 1.5 && x < c + 1.5 && z > b - 1.5 && z < d + 1.5);
     for (let k = 0; k < 6; k++) {
       const x = rng.range(ix0 + 2, ix1 - 2), z = rng.range(iz0 + 2, iz1 - 2);
       if (!free(x, z)) continue;
@@ -3273,7 +3279,7 @@ Object.assign(World.prototype, {
     // crates and pallets
     for (let k = 0; k < 26; k++) {
       const x = rng.range(112, 292), z = rng.range(-14, 290);
-      if (this.C.query(x - 2, z - 2, x + 2, z + 2).some((b) => b.maxY > 0.6)) continue;
+      if (this.reserved(x, z) || this.C.query(x - 2, z - 2, x + 2, z + 2).some((b) => b.maxY > 0.6)) continue;
       const n = rng.int(1, 3);
       for (let s = 0; s < n; s++) { this.B.get('painted', x, z).box(x, s * 1.1, z, 1.1, 1.1, 1.1, col(rng.pick([0x6a5236, 0x5a4a32, 0x4a4e3a])), { faces: F_ALL, top: col(PAL.snowW) }); }
       C.add(x - 0.55, 0, z - 0.55, x + 0.55, n * 1.1, z + 0.55);
@@ -3538,7 +3544,7 @@ Object.assign(World.prototype, {
     this.truck(-132, -199, Math.PI, 0x3e5248, true);
     this.car(-96, -186, Math.PI / 2, 0x2f3a30);
     for (const [bx, bz] of [[-160, -215], [-100, -226], [-176, -232]]) this.sandbags(bx, bz, 4, rng.pick([0, Math.PI / 2]), 3);
-    for (let k = 0; k < 10; k++) { const x = rng.range(-198, -66), z = rng.range(-240, -184); if (this.C.query(x - 2, z - 2, x + 2, z + 2).some((b) => b.maxY > 0.6)) continue; this.B.get('painted', x, z).box(x, 0, z, 1.2, 1.2, 1.2, col(0x3e4a3a), { faces: F_ALL, top: col(PAL.snowW) }); C.add(x - 0.6, 0, z - 0.6, x + 0.6, 1.2, z + 0.6); }
+    for (let k = 0; k < 10; k++) { const x = rng.range(-198, -66), z = rng.range(-240, -184); if (this.reserved(x, z) || this.C.query(x - 2, z - 2, x + 2, z + 2).some((b) => b.maxY > 0.6)) continue; this.B.get('painted', x, z).box(x, 0, z, 1.2, 1.2, 1.2, col(0x3e4a3a), { faces: F_ALL, top: col(PAL.snowW) }); C.add(x - 0.6, 0, z - 0.6, x + 0.6, 1.2, z + 0.6); }
     this.barrel(-150, -186, true); this.barrel(-72, -230, true); this.barrel(-186, -240, false);
     for (const [lx, lz, a] of [[-170, -208, 0], [-140, -186, Math.PI], [-110, -214, 0], [-80, -186, Math.PI], [-170, -244, Math.PI], [-100, -244, Math.PI], [-66, -205, -Math.PI / 2]])
       this.lamp(lx, lz, a, { base: 0, groundY: 0, color: PAL.mercury, h: 7.5, intensity: 30, range: 16, poolK: 0.22 });
@@ -7507,10 +7513,10 @@ class Game {
   loop(tMs) {
     requestAnimationFrame(this.loopBound);
     const t = tMs / 1000;
-    let realDt = this.last ? t - this.last : STEP;
+    const rawDt = this.last ? t - this.last : STEP;
     this.last = t;
-    realDt = clamp(realDt, 0, CONFIG.sim.maxFrameDt);
-    this.frame(realDt);
+    this.rawDt = clamp(rawDt, 0, 2);
+    this.frame(clamp(rawDt, 0, CONFIG.sim.maxFrameDt));
   }
   frame(realDt) {
     if (this.state === 'loading') return;
@@ -7618,7 +7624,7 @@ class Game {
     r.render(this.postScene, this.postCam);
   }
   updateFPS(realDt) {
-    this.frames++; this.fpsT += realDt;
+    this.frames++; this.fpsT += this.rawDt !== undefined ? this.rawDt : realDt;
     if (this.fpsT >= 0.5) {
       const fps = this.frames / this.fpsT; this.frames = 0; this.fpsT = 0;
       if (this.fpsOn) { const i = this.renderer.info.render; G.ui.fps(`${fps.toFixed(0)} FPS  ${(1000 / Math.max(fps, 1)).toFixed(1)} ms\n${i.calls} draw calls  ${(i.triangles / 1000).toFixed(0)}k tris`); }
