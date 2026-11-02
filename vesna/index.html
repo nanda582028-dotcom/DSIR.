@@ -182,6 +182,10 @@ input[type=range]::-moz-range-thumb{width:10px;height:18px;background:var(--ambe
 #endCard .esub{margin-top:16px;font-size:13px;letter-spacing:.3em;color:var(--ink-dim);text-transform:uppercase}
 #endCard .etitle{margin-top:46px;font-size:12px;letter-spacing:.9em;padding-left:.9em;color:var(--ink-faint)}
 #endCard nav{margin-top:40px;display:flex;justify-content:center}
+#ending.light{color:#1c1a16}
+#ending.light #endCard .en,#ending.light #endCard .esub{color:rgba(28,26,22,.6)}
+#ending.light #endCard .etitle{color:rgba(28,26,22,.3)}
+#ending.light .mbtn{color:rgba(28,26,22,.7)}
 #gameover{background:radial-gradient(ellipse at center,rgba(40,6,4,.55),rgba(0,0,0,.92));display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:30;pointer-events:auto}
 #gameover h2{margin:0;font-weight:400;font-size:min(9vw,72px);letter-spacing:.42em;padding-left:.42em;color:var(--ink)}
 #gameover .gsub{margin-top:14px;font-size:12px;letter-spacing:.3em;color:var(--ink-dim);text-transform:uppercase}
@@ -5886,7 +5890,11 @@ class Enemy {
     this.hp -= h.dmg; this.lastHitT = G.player.simTime;
     this.char.flash(1);
     if (!this.aware || !this.inCombat && this.state !== 'hurt' && this.state !== 'stagger' && this.state !== 'down') { this.aware = true; if (this.state !== 'held') { this.detect = 1; this.lastKnown.copy(G.player.pos); } }
-    if (this.hooks.onDamage) this.hooks.onDamage(this, h);
+    if (this.hooks.onDamage && this.hp > 0) {
+      const before = this.state;
+      this.hooks.onDamage(this, h);
+      if (this.state !== before && (this.state === 'scripted' || this.state === 'yield')) return;   // the hook took over this enemy
+    }
     if (this.hp <= 0) {
       if (this.yields || this.hooks.onZero) { this.hp = 0; this.interrupt(); if (this.hooks.onZero) this.hooks.onZero(this, h); else this.yieldNow(); return; }
       this.die({ dir: h.dir, front: false });
@@ -6155,6 +6163,879 @@ class AIManager {
 }
 
 // =====================================================================================
+// 12. NARRATIVE
+// Missions, triggers, the radio queue, memory fragments, documents, checkpoints and endings.
+// Story content (lines, fragments, mission scripts) lives in the data that follows.
+// =====================================================================================
+const OWNER = {
+  signalman: { name: 'The Signalman', real: 'Imre Baranyi', origin: 'Railway signalman, Debrecen', color: '#5fa8d3', hex: 0x5fa8d3, bonus: 'Quieter footsteps. Longer takedown reach.' },
+  paratrooper: { name: 'The Paratrooper', real: 'Arkady Nesterov', origin: 'Airborne sergeant, killed in Afghanistan', color: '#c4473a', hex: 0xc4473a, bonus: 'Heavier strikes. Faster Arm Charge.' },
+  swimmer: { name: 'The Swimmer', real: 'Dieter Lenz', origin: 'Olympic swimmer, Leipzig. Captured after defecting', color: '#e8e6df', hex: 0xe8e6df, bonus: 'Longer dodge. Cheaper on stamina.' },
+  vesna6: { name: 'The Predecessor', real: 'VESNA-6', origin: 'The asset before you', color: '#a59bd0', hex: 0xa59bd0, bonus: 'Every remaining memory is marked on your compass.' },
+};
+const RADIO_SPEAKERS = new Set(['VARGA', 'ORLOV', 'UNKNOWN', 'DIRECTORATE']);
+
+// ------------------------------------------------------------------ radio queue with typewriter subtitles
+class Radio {
+  constructor() { this.queue = []; this.cur = null; this.t = 0; this.gap = 0; this.cps = 40; }
+  say(speaker, text, o = {}) { this.queue.push(Object.assign({ speaker, text }, o)); return this; }
+  clear() { this.queue.length = 0; if (this.cur) { this.cur = null; G.ui.subtitle(null); } }
+  busy() { return !!this.cur || this.queue.length > 0; }
+  update(dt) {
+    if (this.gap > 0) { this.gap -= dt; return; }
+    if (!this.cur) {
+      if (!this.queue.length) return;
+      this.cur = this.queue.shift(); this.t = 0; this.shown = -1;
+      const c = this.cur;
+      c.typeTime = c.text.length / this.cps;
+      c.hold = c.hold !== undefined ? c.hold : 1.6 + c.text.length * 0.045;
+      if (RADIO_SPEAKERS.has(c.speaker)) { G.audio.radioOn(); G.audio.radioHiss(c.typeTime + c.hold); }
+      if (c.onStart) c.onStart();
+    }
+    const c = this.cur;
+    this.t += dt;
+    const n = Math.min(c.text.length, Math.floor(this.t * this.cps));
+    if (n !== this.shown) { this.shown = n; G.ui.subtitle(c.speaker, c.text.slice(0, n), n < c.text.length); if (n > 0 && n < c.text.length && n % 3 === 0 && RADIO_SPEAKERS.has(c.speaker)) G.audio.typeTick(); }
+    if (this.t >= c.typeTime + c.hold) {
+      this.cur = null; this.gap = 0.35;
+      if (!this.queue.length) G.ui.subtitle(null);
+      if (c.onDone) c.onDone();
+    }
+  }
+}
+
+class Narrative {
+  constructor() {
+    this.radio = new Radio();
+    this.timeScale = 1;
+    this.timers = []; this.interactables = []; this.frags = []; this.flags = {};
+    this.collected = new Set(); this.revealed = new Set(); this.formalCount = 0;
+    this.mi = 0; this.si = 0; this.mission = null; this.step = null; this.stepT = 0; this.missionT = 0;
+    this.objective = null; this.checkpoint = null; this.fragScene = null; this.deathT = -1; this.over = false;
+    this.buildFragments();
+    G.ai.listeners.push((ev, e, o) => this.onAIEvent(ev, e, o));
+  }
+
+  // ---------------------------------------------------------------- persistence
+  hasSave() { const s = safeStorageGet('vesna.save'); return !!(s && s.v === 1); }
+  snapshot(stepOverride) {
+    return { v: 1, mission: this.mi, step: stepOverride || 0, flags: Object.assign({}, this.flags), collected: [...this.collected], revealed: [...this.revealed], formalCount: this.formalCount, heat: G.player.heat, charge: G.player.charge };
+  }
+  saveCheckpoint(step = 0) {
+    this.checkpoint = this.snapshot(step);
+    safeStorageSet('vesna.save', this.checkpoint);
+    G.ui.toast('Checkpoint');
+  }
+  persistProgress() {
+    if (!this.checkpoint) return;
+    this.checkpoint.collected = [...this.collected]; this.checkpoint.revealed = [...this.revealed]; this.checkpoint.formalCount = this.formalCount;
+    this.checkpoint.flags = Object.assign({}, this.checkpoint.flags, { spawned: Object.assign({}, this.flags.spawned || {}) });
+    safeStorageSet('vesna.save', this.checkpoint);
+  }
+  restore(cp) {
+    this.flags = Object.assign({}, cp.flags || {});
+    this.collected = new Set(cp.collected || []); this.revealed = new Set(cp.revealed || []); this.formalCount = cp.formalCount || 0;
+    const p = G.player;
+    p.fragments = { signalman: 0, paratrooper: 0, swimmer: 0 };
+    for (const id of this.collected) { const f = this.fragDef(id); if (f && p.fragments[f.owner] !== undefined) p.fragments[f.owner]++; }
+  }
+  newGame() {
+    this.stopAll();
+    this.flags = {}; this.collected.clear(); this.revealed.clear(); this.formalCount = 0; this.over = false;
+    G.player.fragments = { signalman: 0, paratrooper: 0, swimmer: 0 };
+    safeStorageDel('vesna.save');
+    this.startMission(0, false);
+  }
+  loadSave() {
+    const s = safeStorageGet('vesna.save');
+    if (!s || s.v !== 1) return false;
+    this.checkpoint = s;
+    this.loadCheckpoint();
+    return true;
+  }
+  loadCheckpoint() {
+    const cp = this.checkpoint;
+    this.stopAll();
+    if (!cp) { this.newGame(); return; }
+    this.restore(cp);
+    this.over = false;
+    G.player.reset(); G.player.heat = cp.heat !== undefined ? Math.max(cp.heat, 20) : CONFIG.heat.start; G.player.charge = cp.charge || 0;
+    this.startMission(cp.mission, true, cp.step || 0);
+  }
+  stopAll() {
+    this.radio.clear(); this.timers.length = 0; this.interactables.length = 0;
+    this.timeScale = 1; this.fragScene = null; this.deathT = -1; this.objective = null;
+    G.ui.show('fragScene', false); G.ui.show('doc', false); G.ui.show('choice', false); G.ui.show('ending', false); G.ui.show('gameover', false);
+    G.ui.subtitle(null); G.ui.clearHint(); G.ui.boss(null); G.ui.prompt(null);
+    G.game.desatTarget = 0; G.game.postU.uTintK.value = 0; G.game.cameraDistOverride = 0;
+    G.audio.stopAllHums(); G.audio.setWarming(false);
+    G.ai.clearAll();
+    G.cameraRig.lockTarget = null;
+    for (const f of this.frags) { f.active = false; f.dynamicPos = null; }
+  }
+
+  // ---------------------------------------------------------------- missions and steps
+  startMission(i, fromCheckpoint, stepIndex = 0) {
+    this.mi = i; this.mission = MISSIONS[i]; this.missionT = 0;
+    this.timers.length = 0; this.interactables.length = 0;
+    const W = G.world;
+    // world state that depends on progress
+    if (i >= 1) W.openGate(W.gate); else this.closeGate(W.gate);
+    if (i >= 5 && (stepIndex >= 1 || this.flags.neGateOpen)) W.openGate(W.neGate); else this.closeGate(W.neGate);
+    this.refreshFragments();
+    this.mission.start(this, fromCheckpoint, stepIndex);
+    if (!fromCheckpoint || stepIndex === 0) { if (this.mission.num) G.ui.missionCard(this.mission.num, this.mission.title); }
+    if (this.mission.checkpoint !== false) this.saveCheckpoint(stepIndex);
+    this.setStep(stepIndex);
+  }
+  closeGate(g) {
+    if (!g) return;
+    g.open = false; g.t = 0; g.collider.enabled = true;
+    for (const l of g.leaves) l.pivot.rotation.y = 0;
+    if (g.mesh && g.slide) g.mesh.position.z = g.z0;
+  }
+  nextMission() { this.startMission(this.mi + 1, false); }
+  setStep(i) {
+    this.si = i; this.step = this.mission.steps[i]; this.stepT = 0; this.stepCompleted = false;
+    if (!this.step) return;
+    this.setObjective(this.step.obj, this.step.wp);
+    if (this.step.enter) this.step.enter(this);
+  }
+  nextStep() { this.setStep(this.si + 1); }
+  setObjective(text, wp) { this.objective = { text, wp }; G.ui.setObjective(text); }
+  after(sec, fn) { this.timers.push({ t: sec, fn }); }
+  say(speaker, text, o) { this.radio.say(speaker, text, o); }
+  sayAll(lines, onDone) { lines.forEach((l, k) => this.radio.say(l[0], l[1], Object.assign({}, l[2] || {}, k === lines.length - 1 && onDone ? { onDone } : {}))); }
+  hint(text, sec) { G.ui.hint(text, sec || 8); }
+  near(loc, r) { const p = G.player.pos; return Math.hypot(p.x - loc.x, p.z - loc.z) < r; }
+  inRect(x0, z0, x1, z1) { const p = G.player.pos; return p.x > x0 && p.x < x1 && p.z > z0 && p.z < z1; }
+  addInteractable(o) { const it = Object.assign({ r: 1.8, enabled: () => true }, o); this.interactables.push(it); return it; }
+  removeInteractable(id) { this.interactables = this.interactables.filter((i) => i.id !== id); }
+
+  fixedUpdate(dt) {
+    this.missionT += dt; this.stepT += dt;
+    for (let i = this.timers.length - 1; i >= 0; i--) { const t = this.timers[i]; t.t -= dt; if (t.t <= 0) { this.timers.splice(i, 1); t.fn(); } }
+    if (this.step && this.step.update) this.step.update(this, dt);
+    if (this.step && !this.stepCompleted && this.step.check && this.step.check(this)) { const s = this.step; this.stepCompleted = true; if (s.done) s.done(this); else this.nextStep(); }
+    if (this.mission && this.mission.update) this.mission.update(this, dt);
+    this.updateFragments(dt);
+    if (this.deathT >= 0) { this.deathT += dt; if (this.deathT > 2.6) { this.deathT = -1; this.showGameOver(); } }
+  }
+  renderUpdate(realDt) {
+    this.radio.update(realDt);
+    this.renderFragments(realDt);
+    if (this.fragScene) this.updateFragScene(realDt);
+  }
+
+  // ---------------------------------------------------------------- interaction
+  interactCandidate(p) {
+    let best = null, bd = Infinity;
+    for (const it of this.interactables) {
+      if (!it.enabled()) continue;
+      const d = Math.hypot(p.pos.x - it.x, p.pos.z - it.z);
+      if (d < it.r && d < bd && Math.abs((it.y || p.pos.y) - p.pos.y) < 2) { bd = d; best = it; }
+    }
+    return best;
+  }
+  useInteractable(it) {
+    const p = G.player;
+    p.targetYaw = yawTo(p.pos.x, p.pos.z, it.x, it.z);
+    if (it.anim !== false) { p.setState('interact'); p.interactDur = it.dur || 1.2; p.anim.play('interact', { blend: 0.25 }); }
+    if (it.once) this.removeInteractable(it.id);
+    this.after(it.delay !== undefined ? it.delay : 0.9, () => it.use(this));
+  }
+
+  // ---------------------------------------------------------------- documents
+  showDocument(html, onClose) {
+    G.ui.el.docPaper.innerHTML = html;
+    G.ui.show('doc'); G.audio.paper();
+    this.docClose = onClose;
+    G.game.state = 'paused'; G.audio.suspend();
+    G.input.exitLock();
+    this.docOpenT = now();
+  }
+  closeDocument() {
+    if (!G.ui.isShown('doc') || now() - (this.docOpenT || 0) < 0.6) return;
+    G.ui.show('doc', false); G.audio.resume(); G.audio.paper();
+    G.game.state = 'play'; G.input.clear();
+    if (!CONFIG.debug && !G.input.locked) { G.game.pendingLock = true; G.input.requestLock(); }
+    const f = this.docClose; this.docClose = null;
+    if (f) f(this);
+  }
+
+  // ---------------------------------------------------------------- fragments
+  fragDef(id) { return FRAGMENTS.find((f) => f.id === id); }
+  buildFragments() {
+    const geo = new THREE.OctahedronGeometry(0.24, 0);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    this.fragMesh = new THREE.InstancedMesh(geo, mat, FRAGMENTS.length);
+    this.fragMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.fragMesh.frustumCulled = false;
+    this.frags = FRAGMENTS.map((d, i) => ({ d, i, active: false, dynamicPos: null, y: 0, t: Math.random() * 10 }));
+    for (const f of this.frags) { const c = col(OWNER[f.d.owner].hex); this.fragMesh.setColorAt(f.i, new THREE.Color(c.r * 2.2, c.g * 2.2, c.b * 2.2)); _m0.makeTranslation(0, -999, 0); this.fragMesh.setMatrixAt(f.i, _m0); }
+    G.scene.add(this.fragMesh);
+  }
+  refreshFragments() {
+    for (const f of this.frags) {
+      const d = f.d;
+      const sp = this.flags.spawned && this.flags.spawned[d.id];
+      if (sp) f.dynamicPos = sp;
+      f.active = !this.collected.has(d.id) && (d.always || !!sp);
+      const pos = f.dynamicPos || d.pos;
+      if (pos) { f.x = pos[0]; f.z = pos[1]; f.y = pos[2] !== undefined ? pos[2] : G.colliders.ground(pos[0], pos[1], 50, 100) + 1.0; }
+    }
+  }
+  spawnFragment(id, x, z, y) {
+    const f = this.frags.find((q) => q.d.id === id);
+    if (!f || this.collected.has(id)) return;
+    const gy = y !== undefined ? y : G.colliders.ground(x, z, G.player.pos.y + 1.5, 2) + 1.0;
+    f.dynamicPos = [x, z, gy]; f.active = true; f.x = x; f.z = z; f.y = gy;
+    (this.flags.spawned || (this.flags.spawned = {}))[id] = [x, z, gy];
+    this.persistProgress();
+  }
+  updateFragments(dt) {
+    const p = G.player;
+    if (p.state !== 'move' || this.fragScene) return;
+    for (const f of this.frags) {
+      if (!f.active) continue;
+      const d = Math.hypot(p.pos.x - f.x, p.pos.z - f.z);
+      if (d < CONFIG.fragments.pickupRadius && Math.abs(p.pos.y + 1 - f.y) < 1.8) this.collect(f);
+    }
+  }
+  renderFragments(dt) {
+    const cam = G.camera.position;
+    for (const f of this.frags) {
+      if (!f.active) { _m0.makeTranslation(0, -999, 0); this.fragMesh.setMatrixAt(f.i, _m0); G.audio.setHum(f.d.id, f.d.owner, null, 0); continue; }
+      f.t += dt;
+      const y = f.y + Math.sin(f.t * 1.6) * 0.12;
+      _q0.setFromEuler(_e0.set(0.4, f.t * 1.2, 0.25));
+      _m0.compose(_v0.set(f.x, y, f.z), _q0, _v1.set(1, 1.35, 1));
+      this.fragMesh.setMatrixAt(f.i, _m0);
+      const c = col(OWNER[f.d.owner].hex), pulse = 0.75 + 0.25 * Math.sin(f.t * 3);
+      G.dynGlows.push(f.x, y, f.z, c.r * 0.9 * pulse, c.g * 0.9 * pulse, c.b * 0.9 * pulse, 0.9);
+      G.dynGlows.push(f.x, y, f.z, c.r * 0.18, c.g * 0.18, c.b * 0.18, 3.6);
+      const d = Math.hypot(cam.x - f.x, cam.z - f.z);
+      G.audio.setHum(f.d.id, f.d.owner, { x: f.x, y, z: f.z }, d < CONFIG.fragments.humRadius ? Math.pow(1 - d / CONFIG.fragments.humRadius, 1.5) : 0);
+    }
+    this.fragMesh.instanceMatrix.needsUpdate = true;
+  }
+  collect(f) {
+    const d = f.d, own = OWNER[d.owner], p = G.player;
+    f.active = false; this.collected.add(d.id);
+    if (p.fragments[d.owner] !== undefined) p.fragments[d.owner]++;
+    if (d.owner === 'vesna6') for (const q of FRAGMENTS) if (!this.collected.has(q.id)) this.revealed.add(q.id);
+    G.audio.setHum(d.id, d.owner, null, 0);
+    G.audio.fragmentCue(d.owner);
+    G.audio.pickup();
+    this.fragScene = { f, t: 0, done: false };
+    G.ui.fragment(own.name, own.color, d.text);
+    G.game.desatTarget = 0.88;
+    const tc = col(own.hex); G.game.postU.uTint.value.set(0.55 + tc.r * 0.45, 0.55 + tc.g * 0.45, 0.55 + tc.b * 0.45); G.game.postU.uTintK.value = 0.6;
+    this.persistProgress();
+    if (d.onCollect) d.onCollect(this);
+  }
+  updateFragScene(realDt) {
+    const s = this.fragScene;
+    s.t += realDt;
+    this.timeScale = damp(this.timeScale, 0.06, 6, realDt);
+    const canClose = s.t > 1.8;
+    if (canClose) G.ui.fragmentHint(true);
+    if ((canClose && (G.input.consume('interact', 0.4) || G.input.consume('attack', 0.4))) || s.t > 10) {
+      this.fragScene = null; this.timeScale = 1;
+      G.ui.fragmentHide(); G.game.desatTarget = 0; G.game.postU.uTintK.value = 0;
+      const own = OWNER[s.f.d.owner];
+      G.ui.toast(own.name + ': ' + own.bonus);
+      if (s.f.d.after) s.f.d.after(this);
+    }
+  }
+  compassExtras() {
+    const out = [];
+    for (const f of this.frags) if (f.active && this.revealed.has(f.d.id)) out.push({ x: f.x, z: f.z, color: OWNER[f.d.owner].color });
+    return out;
+  }
+  revealNearest() {
+    const p = G.player.pos;
+    let best = null, bd = Infinity;
+    for (const f of this.frags) {
+      if (this.collected.has(f.d.id) || this.revealed.has(f.d.id) || f.d.story) continue;
+      const pos = f.dynamicPos || f.d.pos; if (!pos) continue;
+      const d = Math.hypot(pos[0] - p.x, pos[1] - p.z);
+      if (d < bd) { bd = d; best = f; }
+    }
+    if (best) { this.revealed.add(best.d.id); return best; }
+    return null;
+  }
+
+  // ---------------------------------------------------------------- formal address
+  onFormalAddressBegin(e) {
+    const line = e.tag === 'halasz' ? 'Halász hadnagy elvtárs.' : 'Comrade ' + (e.rank || '') + '.';
+    this.radio.clear();
+    this.say('VESNA-7', line.replace('Comrade .', 'Comrade.'), { hold: 1.0 });
+  }
+  onFormalAddressComplete(e) {
+    this.formalCount++;
+    if (e.tag === 'halasz') this.flags.halaszFormal = true;
+    const thought = FORMAL_THOUGHTS[(this.formalCount - 1) % FORMAL_THOUGHTS.length];
+    this.after(1.4, () => { this.say('VESNA-7', thought, { hold: 2.2 }); });
+    const f = this.revealNearest();
+    this.after(2.4, () => { G.ui.toast(f ? 'A memory stirs. Its direction is marked on your compass.' : 'A memory stirs, and finds nothing left to show.'); });
+    if (this.formalCount === 3) this.after(9, () => this.say('VARGA', 'You keep greeting them, Vesna. We did not teach you that.'));
+    this.persistProgress();
+  }
+
+  // ---------------------------------------------------------------- AI events
+  onAIEvent(ev, e, o) {
+    if (this.mission && this.mission.onAI) this.mission.onAI(this, ev, e, o);
+  }
+
+  // ---------------------------------------------------------------- death and game over
+  onPlayerDeath() { if (this.over) return; this.deathT = 0; G.audio.setCombat(0); G.game.desatTarget = 0.7; }
+  showGameOver() {
+    G.game.state = 'gameover'; G.input.exitLock(); G.ui.show('gameover');
+    G.ui.el.goSub.textContent = this.mission ? (this.mission.num + ' · ' + this.mission.title) : 'Signal terminated';
+    G.ui.subtitle(null); this.radio.clear();
+  }
+
+  // ---------------------------------------------------------------- HUD helpers
+  waypoint() {
+    if (!this.objective || !this.objective.wp) return null;
+    const w = typeof this.objective.wp === 'function' ? this.objective.wp(this) : this.objective.wp;
+    return w || null;
+  }
+  drawMarkers() {
+    const w = this.waypoint();
+    if (!w) return;
+    const sc = { x: 0, y: 0 };
+    const y = (w.y !== undefined ? w.y : G.terrain.heightAt(w.x, w.z)) + 2.2;
+    _v4.set(w.x, y, w.z);
+    const d = Math.hypot(w.x - G.player.pos.x, w.z - G.player.pos.z);
+    if (d < 2.5) return;
+    if (G.ui.project(_v4, sc)) G.ui.marker('wpw', `<div class="wpd"></div><div class="wpt">${Math.round(d)} m</div>`, sc.x, sc.y);
+  }
+  pauseMeta() { return this.mission ? this.mission.num + ' · ' + this.mission.title : 'Sorvograd'; }
+
+  // ---------------------------------------------------------------- journal
+  renderJournal() {
+    const cols = ['signalman', 'paratrooper', 'swimmer'].map((o) => {
+      const own = OWNER[o], frs = FRAGMENTS.filter((f) => f.owner === o);
+      const n = frs.filter((f) => this.collected.has(f.id)).length;
+      const slots = frs.map((f, k) => this.collected.has(f.id)
+        ? `<div class="jslot"><div class="jn" style="color:${own.color}">FRAGMENT ${k + 1}</div>${escapeHTML(f.text)}</div>`
+        : `<div class="jslot empty">. . . . . . . .</div>`).join('');
+      const name = n >= 3 ? `${escapeHTML(own.name)} <span style="color:var(--ink-dim);font-size:11px">${escapeHTML(own.real)}</span>` : escapeHTML(own.name);
+      return `<div class="jcol"><h4 style="color:${own.color}">${name}</h4><div class="jo">${n >= 2 ? escapeHTML(own.origin) : 'Origin unknown'}<br>${n} of 4 recovered</div>${slots}<div class="jbonus">${n ? escapeHTML(own.bonus) + ' (x' + n + ')' : 'No bonus yet'}</div></div>`;
+    }).join('');
+    G.ui.el.jCols.innerHTML = cols;
+    const v6 = FRAGMENTS.find((f) => f.owner === 'vesna6');
+    let extra = '';
+    extra += this.collected.has(v6.id) ? `<b>THE PREDECESSOR</b> &middot; ${escapeHTML(v6.text)}<br>` : `<b>THE PREDECESSOR</b> &middot; <span style="opacity:.5">One fragment that belongs to none of the three.</span><br>`;
+    extra += `Formal Addresses spoken: ${this.formalCount}. `;
+    extra += `<span style="opacity:.75">Who you can become at the end depends on whose memories you carry.</span>`;
+    G.ui.el.jExtra.innerHTML = extra;
+  }
+
+  // ---------------------------------------------------------------- the final choice and endings
+  counts() { const c = { signalman: 0, paratrooper: 0, swimmer: 0 }; for (const id of this.collected) { const f = this.fragDef(id); if (f && c[f.owner] !== undefined) c[f.owner]++; } return c; }
+  showChoice() {
+    const c = this.counts();
+    G.game.state = 'paused'; G.input.exitLock(); G.audio.setCombat(0);
+    const opts = [];
+    for (const o of ['signalman', 'paratrooper', 'swimmer']) {
+      const own = OWNER[o], ok = c[o] >= 3;
+      opts.push({ key: 'claim:' + o, ok, title: 'Claim one man: ' + (ok ? own.real : own.name), desc: ok ? `Take his name and walk into his unfinished life. ${own.origin}.` : `Requires three memories of ${own.name.toLowerCase()} (you carry ${c[o]}).`, color: own.color });
+    }
+    const all2 = c.signalman >= 2 && c.paratrooper >= 2 && c.swimmer >= 2;
+    opts.push({ key: 'compose', ok: all2, title: 'Compose a new self', desc: all2 ? 'Give the three men back their names. Choose one that was never recorded.' : `Requires two memories of each man (you carry ${c.signalman}, ${c.paratrooper} and ${c.swimmer}).` });
+    opts.push({ key: 'winter', ok: true, title: 'Return to winter', desc: 'Lay down the arm. Let them recondition you. The war scare will pass without you.' });
+    G.ui.el.choiceMeta.textContent = `Memories carried: Signalman ${c.signalman}, Paratrooper ${c.paratrooper}, Swimmer ${c.swimmer}.`;
+    G.ui.el.choiceOpts.innerHTML = opts.map((o) => `<button class="copt" data-k="${o.key}" ${o.ok ? '' : 'disabled'}><div class="ct" style="${o.color && o.ok ? 'color:' + o.color : ''}">${escapeHTML(o.title)}</div><div class="cd">${escapeHTML(o.desc)}</div></button>`).join('');
+    G.ui.show('nameEntry', false);
+    G.ui.show('choice');
+    G.ui.el.choiceOpts.querySelectorAll('.copt').forEach((b) => b.addEventListener('click', () => {
+      if (b.disabled) return;
+      G.audio.uiClick();
+      const k = b.dataset.k;
+      if (k === 'compose') { G.ui.show('nameEntry'); const inp = G.ui.el.nameInput; inp.value = ''; setTimeout(() => inp.focus(), 50); return; }
+      this.playEnding(k);
+    }));
+    const ok = $('btnNameOk'), inp = G.ui.el.nameInput;
+    const submit = () => { const name = sanitizeName(inp.value); if (!name) { inp.focus(); return; } this.playEnding('compose', name); };
+    ok.onclick = submit;
+    inp.onkeydown = (e) => { if (e.key === 'Enter') submit(); e.stopPropagation(); };
+  }
+  playEnding(kind, name) {
+    this.over = true;
+    G.ui.show('choice', false);
+    const E = ENDINGS[kind.startsWith('claim:') ? kind : kind];
+    const ending = typeof E === 'function' ? E(name) : E;
+    G.game.state = 'ending';
+    G.ui.ending(ending);
+    G.audio.setCombat(0);
+    if (kind === 'winter') { G.game.fade.targetWhite = 1; G.game.fade.speed = 0.35; }
+    else { G.game.fade.targetBlack = 1; G.game.fade.speed = 0.5; }
+    G.audio.fragmentCue(kind === 'winter' ? 'vesna6' : kind === 'compose' ? 'swimmer' : kind.split(':')[1]);
+    const done = this.flags.endings || [];
+    if (!done.includes(kind)) done.push(kind);
+    this.flags.endings = done;
+    if (this.checkpoint) { this.checkpoint.flags = Object.assign({}, this.checkpoint.flags, { endings: done }); safeStorageSet('vesna.save', this.checkpoint); }
+  }
+}
+function sanitizeName(s) { return String(s || '').replace(/[^A-Za-zÀ-ɏЀ-ӿ' -]/g, '').replace(/\s+/g, ' ').trim().slice(0, 22); }
+
+// ------------------------------------------------------------------ story data: fragments, documents, endings
+const FRAGMENTS = [
+  { id: 'S1', owner: 'signalman', story: true, text: 'Platform four, Debrecen. Halasz brought the coffee, and the coffee was always cold. We laughed about it every night for nine years.' },
+  { id: 'S2', owner: 'signalman', always: true, pos: [-234.2, 213], text: 'Every train gets a greeting, even the empty ones. My father taught me that. Good evening, comrade driver. Safe journey.' },
+  { id: 'S3', owner: 'signalman', always: true, pos: [27.5, 100.5], text: 'The night the refugee train came through, I set the signal to clear and walked home. I did not look back. That was my whole revolution.' },
+  { id: 'S4', owner: 'signalman', always: true, pos: [-88, -218.6], text: 'They told my sister I fell beneath a goods train. I remember the room they took me to instead. It had no windows and very good heating.' },
+  { id: 'P1', owner: 'paratrooper', story: true, text: 'Third crane from the gate. I buried the crate under its ballast myself. Nobody digs beneath a crane.' },
+  { id: 'P2', owner: 'paratrooper', story: true, text: 'Panjshir, the second winter. We buried our dead in their coats, because there was nothing else to bury them in.' },
+  { id: 'P3', owner: 'paratrooper', always: true, pos: [245.5, 214.5], text: 'My mother kept my letters in a biscuit tin in Ryazan. I always wrote that it was warm there, and that the food was good.' },
+  { id: 'P4', owner: 'paratrooper', always: true, pos: [9.2, -19.5], text: 'The rotor wash flattened the snow on the ridge into a perfect circle. I remember thinking it was beautiful. Then the shooting started.' },
+  { id: 'W1', owner: 'swimmer', always: true, pos: [27, 263.6, 1.35], text: 'Leipzig, fifty metres, six in the morning. The water was the only place in the republic where nobody could listen to you.' },
+  { id: 'W2', owner: 'swimmer', always: true, pos: [-15, -124.5], text: 'I chose the Baltic crossing because I could hold my breath for three minutes. They caught me in two.' },
+  { id: 'W3', owner: 'swimmer', always: true, pos: [-126.8, -239.2, 1.1], text: 'They asked me to count backwards from one hundred while the tape played. A woman’s voice. She sounded sorry.' },
+  { id: 'W4', owner: 'swimmer', always: true, pos: [59.5, -276, -2.55], text: 'The trick with cold water is not to fight it. You let it in and you keep swimming. Lenz means spring. My coach thought that was very funny.' },
+  { id: 'V6', owner: 'vesna6', story: true, text: 'Six remembers his first morning. A woman’s voice said: good morning, Vesna. It is the same voice. It always was.' },
+];
+const FORMAL_THOUGHTS = [
+  'The words arrive before I choose them.',
+  'I do not know who taught me to be polite to the dying.',
+  'A habit with no owner. Or an owner I have not met.',
+  'Somewhere, a man greeted every train, even the empty ones.',
+  'Each time, the voice in my mouth sounds less like mine.',
+];
+const DOCS = {
+  thaw: `<div class="stampr">EYES ONLY</div><h4>Directorate Nine &middot; Sorvograd section</h4><div class="dt">Operation Thaw</div>
+    <p>1. On the night of the NATO exercise, asset <b>VESNA-7</b> will cross the Sorvograd border bridge in the uniform of a frontier guard.</p>
+    <p>2. The asset will open fire on the western checkpoint. Western return fire will be recorded from our side of the river and broadcast at dawn.</p>
+    <p>3. The Committee will be presented with an act of aggression during a nuclear alert. It will not have time to doubt it.</p>
+    <p>4. A limited exchange now is preferable to a total exchange later. History will not thank us. It will not be in a position to.</p>
+    <p>5. The asset is not expected to return. <span class="redact">The asset</span> does not need to be told.</p>
+    <p style="margin-top:22px">Approved: Col. M. Orlov<br>Copy 2 of 2. Destroy after reading.</p>`,
+  files: `<div class="stampr">PROGRAMME VESNA</div><h4>Directorate Nine &middot; Conditioning record</h4><div class="dt">Asset VESNA-7</div>
+    <p><b>Source material, composite.</b></p>
+    <p>A. BARANYI, Imre. Railway signalman, Debrecen. Deceased 1981. Retained: patience, courtesy, the formal address.</p>
+    <p>B. NESTEROV, Arkady. Sergeant, airborne forces. Deceased 1982, Panjshir valley. Retained: aggression under fire, small unit tactics.</p>
+    <p>C. LENZ, Dieter. Competition swimmer, Leipzig. Detained 1982 after an attempted defection by sea. Deceased in custody. Retained: endurance, breath control.</p>
+    <p><b>Host:</b> unregistered male, approximately thirty years. No prior identity recovered. No next of kin.</p>
+    <p><b>Note, Dr I. Varga:</b> integration incomplete. The three sources do not agree. Recommend that reconditioning be delayed indefinitely.</p>
+    <p><b>Note, Col. M. Orlov:</b> Denied. They do not need to agree. They need to obey. Proceed with THAW on schedule.</p>`,
+};
+const ENDINGS = {
+  'claim:signalman': { color: '#0d1a22', kicker: 'CLAIM ONE MAN', name: 'IMRE BARANYI', sub: 'Debrecen, spring 1984', lines: [
+    'He took the name Imre Baranyi, and the night train south.',
+    'In Debrecen, a woman opened her door to a stranger with her brother’s manners.',
+    'She did not ask about the arm. He did not ask about the grave.',
+    'In March he went back to the signal box at the end of platform four.',
+    'The levers were stiff. He oiled them one by one, as if he had always known how.'] },
+  'claim:paratrooper': { color: '#220e0c', kicker: 'CLAIM ONE MAN', name: 'ARKADY NESTEROV', sub: 'Ryazan, spring 1984', lines: [
+    'He took the name Arkady Nesterov, and a set of papers that should have been burned.',
+    'The army had buried Nesterov once already. It did not care to do so twice.',
+    'He found the mother in Ryazan. She looked at him for a long time, then set out two cups.',
+    'Some nights he still woke at three with his hands closed into fists.',
+    'On those nights he walked until morning, and the fists opened.'] },
+  'claim:swimmer': { color: '#1a1c1f', kicker: 'CLAIM ONE MAN', name: 'DIETER LENZ', sub: 'The other bank, spring 1984', lines: [
+    'He took the name Dieter Lenz, which means spring, and went down to the river in March.',
+    'The ice was breaking. He crossed before the guards changed shift.',
+    'On the other bank, an old coach waited beside a public pool that never closed.',
+    'He swam the length of it once, slowly, the ceramic arm cutting the water.',
+    'Nobody listened. Nobody needed to.'] },
+  compose: (name) => ({ color: '#16130d', kicker: 'COMPOSE A NEW SELF', name: name.toUpperCase(), sub: 'Born November 1983', lines: [
+    'He gave the three men back their names, and kept only what they had taught him.',
+    'Patience from the signalman. Nerve from the soldier. Breath from the swimmer.',
+    'At the border the guard asked for his name. He said it aloud for the first time.',
+    'It belonged to no file. Nobody had recorded it. Nobody could take it back.',
+    'Behind him, very slowly, the river began to thaw.'] }),
+  winter: { color: '#ffffff', ink: '#1c1a16', kicker: 'RETURN TO WINTER', name: 'VESNA-7', sub: 'Reconditioned, 11 November 1983', lines: [
+    'He laid the arm across his knees and waited for the trucks.',
+    'Dr Varga did not come. Someone else read the words into the recorder.',
+    'Good morning, Vesna.',
+    'In Moscow and in Brussels, the exercise ended. The missiles stayed where they were. Almost nobody learned how close it had come.',
+    'In Sorvograd, the snow fell on the bridge, and covered everything.'] },
+};
+
+// ------------------------------------------------------------------ spawn helpers
+function routeOf(pts, loop) { const r = pts.map((p) => p.slice()); r.loop = !!loop; return r; }
+function spawnAmbient() {
+  const S = (t, x, z, o) => G.ai.spawn(t, x, z, Object.assign({ tag: 'ambient' }, o));
+  S('guard', -4, 80, { route: routeOf([[-4, 80, 3], [-4, 128, 2], [4, 172, 2], [4, 205, 3]]) });
+  S('guard', -90, 139, { route: routeOf([[-90, 139, 3], [-60, 139, 2], [-22, 139, 3]]) });
+  S('guard', 20, 58.5, { route: routeOf([[20, 58.5, 2], [92, 58.5, 3]]) });
+  S('guard', -80, 221.5, { route: routeOf([[-80, 221.5, 3], [-18, 221.5, 3]]) });
+}
+function playerScripted(p, update, hidden) { p.setState('scripted'); p.scripted = { update, hidden }; p.vel.set(0, p.vel.y, 0); p.blocking = false; p.anim.setLayer('block', 0); }
+function playerFree(p) { if (p.state === 'scripted') { p.scripted = null; p.setState('move'); p.anim.play('move', { blend: 0.3 }); } p.control = true; }
+
+// ------------------------------------------------------------------ the missions
+const MISSIONS = [
+  // ================================================================ PROLOGUE
+  {
+    id: 'prologue', num: 'PROLOGUE', title: 'ACTIVATION',
+    start(N, fromCp) {
+      const L = G.world.LOC, p = G.player;
+      p.reset(); p.heat = CONFIG.heat.start;
+      p.place(-41.05, 153.0, Math.PI / 2, 0.3);
+      G.cameraRig.snapBehind(Math.PI / 2); G.cameraRig.pitch = -0.2;
+      p.anim.play('getUp', { blend: 0.01, restart: true });
+      playerScripted(p, (dt, pl) => { if (pl.stateT > 4.4) playerFree(pl); });
+      G.game.fade.black = 1; G.game.fade.targetBlack = 0; G.game.fade.speed = 0.45;
+      const iv = G.ai.spawn('sparring', -31, 180, { tag: 'ivashko', name: 'Ivashko', rank: 'Sergeant', yaw: Math.PI, state: 'scripted', yields: true, dmgMul: 0.45, cdMul: 1.7, hp: 70 });
+      iv.noTakedown = true; iv.noFlee = true; iv.homeYaw = Math.PI;
+      iv.scripted = { update(dt, e) { const pl = G.player; return { face: Math.atan2(pl.pos.x - e.pos.x, pl.pos.z - e.pos.z) }; } };
+      N.flags.sparHits = 0;
+    },
+    onAI(N, ev, e) { if (ev === 'alert' && e.tag === 'ivashko') { /* sparring partner never raises an alarm */ } },
+    steps: [
+      { obj: 'Warm the arm at the stove.', wp: () => G.world.LOC.stove,
+        enter(N) { N.after(1.6, () => N.say('VARGA', 'Good morning, Vesna. Your arm is cold. Warm it before you go out.')); N.after(5.2, () => N.hint('<span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span> move. The mouse looks around.', 7)); },
+        update(N) { if (!N.flags.stoveHint && N.near(G.world.LOC.stove, 3.2)) { N.flags.stoveHint = true; N.hint('Hold <span class="kbd">E</span> at the stove to warm the Polar Limb. Watch the gauge on the left.', 9); } },
+        check: () => G.player.heat >= CONFIG.heat.warmThreshold },
+      { obj: 'Go out to the courtyard.', wp: () => G.world.LOC.courtyard,
+        enter(N) { G.ui.clearHint(); N.sayAll([['VARGA', 'Good. Warm, the arm is quick and precise. Cold, it is slow and heavy, and it breaks things.'], ['VARGA', 'Learn which one you need. The winter will not ask.']]); },
+        check: (N) => N.inRect(-46, 163, -16, 190) },
+      { obj: 'Spar with Sergeant Ivashko.', wp: null,
+        enter(N) {
+          const iv = G.ai.byTag('ivashko')[0];
+          N.sayAll([['VARGA', 'Sergeant Ivashko has volunteered to spar with you. Try not to kill him.'], ['IVASHKO', 'Volunteered. Yes. That is one word for it.']], () => { if (iv && iv.alive && iv.state !== 'yield') { iv.toCombat(); iv.cooldown = 1.5; } N.hint('<span class="kbd">LMB</span> strike. Three strikes in rhythm make a combination.', 8); });
+          G.player.charge = Math.max(G.player.charge, 55);
+          N.flags.sparStart = N.missionT;
+        },
+        update(N) {
+          const iv = G.ai.byTag('ivashko')[0];
+          if (!iv) return;
+          const hits = G.combat.log.filter((l) => l.a === 'player' && l.t === 'sparring' && l.result === 'hit').length;
+          if (hits >= 2 && !N.flags.hBlock) { N.flags.hBlock = true; N.hint('<span class="kbd">RMB</span> block. Press it just as a blow lands to parry and open a counter.', 9); }
+          if ((G.combat.log.some((l) => l.result === 'parried') || N.stepT > 22) && !N.flags.hDodge && N.flags.hBlock) { N.flags.hDodge = true; N.hint('<span class="kbd">Q</span> roll away. It costs stamina. <span class="kbd">R</span> locks on.', 8); }
+          if (G.player.charge >= CONFIG.charge.max && !N.flags.hPolar && N.flags.hBlock) { N.flags.hPolar = true; N.hint('The arm is charged. <span class="kbd">F</span> Polar Strike breaks any guard.', 9); }
+          if (iv.state === 'yield' && !N.flags.ivYield) {
+            N.flags.ivYield = true;
+            N.radio.clear();
+            N.sayAll([['IVASHKO', 'Enough. Enough! I yield, comrade.'], ['VARGA', 'Adequate. Your first assignment is in the rail yard.'], ['VARGA', 'Lieutenant Halasz, signals. He has been talking to the wrong people. Quietly, Vesna. No alarms.']], () => { N.flags.sparDone = true; });
+            G.world.openGate(G.world.gate);
+          }
+        },
+        check: (N) => N.flags.sparDone,
+        done(N) { N.nextMission(); } },
+    ],
+  },
+  // ================================================================ MISSION 1
+  {
+    id: 'm1', num: 'MISSION 1', title: 'THE SIGNALS OFFICER',
+    start(N, fromCp) {
+      const p = G.player, L = G.world.LOC;
+      if (fromCp) { p.place(L.gateIn.x, L.gateIn.z, Math.PI / 2, 0.3); G.cameraRig.snapBehind(Math.PI / 2); }
+      let iv = G.ai.byTag('ivashko')[0];
+      if (!iv) { iv = G.ai.spawn('sparring', -22.5, 185.5, { tag: 'ivashko', state: 'scripted', yaw: -Math.PI / 2 }); }
+      iv.noTakedown = true; iv.untargetable = true; iv.interrupt(); iv.setState('scripted'); iv.anim.play('move', { blend: 0.5 });
+      iv.scripted = { update(dt, e) { const pl = G.player, d = Math.hypot(e.pos.x + 21.5, e.pos.z - 185.5); if (d > 0.6) e.moveTo(-21.5, 185.5, 1.3, dt, 0.4); return d > 0.6 ? null : { face: Math.atan2(-20.5 - e.pos.x, 186.5 - e.pos.z) }; } };
+      spawnAmbient();
+      const S = (t, x, z, o) => G.ai.spawn(t, x, z, Object.assign({ tag: 'm1' }, o));
+      const h = G.ai.spawn('officer', -166, 126, { tag: 'halasz', name: 'Halasz', rank: 'Lieutenant', route: routeOf([[-166, 126, 4], [-158, 109, 3], [-171, 108, 3]], true) });
+      h.alwaysActive = true;
+      S('guard', -131, 70, { route: routeOf([[-131, 70, 2], [-131, 118, 3]]) });
+      S('guard', -176, 129, { yaw: Math.PI / 2, state: 'idle' });
+      S('guard', -150, 96, { route: routeOf([[-150, 96, 2], [-150, 113, 2], [-180, 113, 2], [-180, 96, 2]], true) });
+      S('guard', -234, 60, { route: routeOf([[-234, 60, 3], [-234, 180, 3]]), lantern: true });
+      S('rifleman', -186, 150, { yaw: 2.4, state: 'idle' });
+      S('guard', -113, 152, { yaw: Math.PI / 2, state: 'idle' });
+      N.flags.m1Alarm = false;
+    },
+    onAI(N, ev, e, o) {
+      if (ev === 'alert' && (e.tag === 'm1' || e.tag === 'halasz') && !N.flags.m1Alarm && N.si <= 1) { N.flags.m1Alarm = true; N.after(1.2, () => N.say('VARGA', 'You have been seen. It no longer matters how. Finish it.')); }
+      if (ev === 'death' && e.tag === 'halasz') {
+        const formal = o && o.formal;
+        const lines = formal
+          ? [['HALASZ', 'Imre? You always said it like that. Imre Baranyi...', { hold: 2.2 }], ['HALASZ', 'No. I signed your death certificate, Imre. I signed it myself.', { hold: 2.6 }]]
+          : [['HALASZ', '...Imre?', { hold: 1.6 }], ['HALASZ', 'Imre Baranyi. No. Imre is dead. I signed the report myself.', { hold: 2.6 }]];
+        N.radio.clear();
+        N.after(1.0, () => N.sayAll(lines, () => { N.flags.halaszDone = true; }));
+        N.spawnFragment('S1', e.pos.x + 0.9, e.pos.z + 0.6);
+      }
+    },
+    steps: [
+      { obj: 'Reach the rail yard.', wp: () => G.world.LOC.railGate,
+        enter(N) { N.after(2, () => N.say('VARGA', 'The rail yard is west of you. The curfew patrols do not know who you are, and they do not need to. Keep to the shadows.')); },
+        check: () => G.player.pos.x < -104 },
+      { obj: 'Eliminate Lieutenant Halasz. Do not raise the alarm.', wp: () => { const h = G.ai.byTag('halasz')[0]; return h && h.alive ? { x: h.pos.x, z: h.pos.z } : G.world.LOC.tower; },
+        enter(N) {
+          N.say('VARGA', 'Halasz works the signal tower at night. He likes the cold. He says it keeps him honest.');
+          N.after(4, () => N.hint('Stay out of the light: in darkness they see you only up close. <span class="kbd">C</span> crouch to move quietly.', 9));
+        },
+        update(N) {
+          if (!N.flags.hTakedown && G.ai.enemies.some((e) => e.alive && e.tag !== 'ambient' && UNAWARE.has(e.state) && Math.hypot(e.pos.x - G.player.pos.x, e.pos.z - G.player.pos.z) < 14)) { N.flags.hTakedown = true; N.hint('Behind an unaware man, <span class="kbd">E</span> takedown. Hold <span class="kbd">E</span> to speak a Formal Address first.', 10); }
+        },
+        check: (N) => { const h = G.ai.byTag('halasz')[0]; return !h || !h.alive; } },
+      { obj: 'Return to the safehouse.', wp: () => G.world.LOC.safehouseStreet,
+        enter(N) {
+          N.after(N.flags.halaszDone ? 0.5 : 7.5, () => N.say('VARGA', N.flags.m1Alarm ? 'Messy. He said nothing of importance. Return to the safehouse.' : 'He said nothing of importance. Return to the safehouse.'));
+          N.spawnFragment('P1', -11.6, 172.6);
+        },
+        check: (N) => N.collected.has('P1'),
+        done(N) { N.nextMission(); } },
+    ],
+  },
+  // ================================================================ MISSION 2
+  {
+    id: 'm2', num: 'MISSION 2', title: 'THE CACHE',
+    start(N, fromCp) {
+      const p = G.player;
+      if (fromCp) { p.place(-11, 175, Math.PI / 2, 0.3); G.cameraRig.snapBehind(Math.PI / 2); spawnAmbient(); }
+      const S = (t, x, z, o) => G.ai.spawn(t, x, z, Object.assign({ tag: 'm2' }, o));
+      S('guard', 152.5, 120.5, { yaw: -2.2, state: 'idle' });
+      S('guard', 204.5, 130.5, { yaw: -2.4, state: 'idle' });
+      S('guard', 120, 40, { route: routeOf([[120, 40, 2], [140, 46, 2], [140, 70, 3]]) });
+      S('brute', 161, 27, { yaw: Math.PI * 0.9, state: 'idle' });
+      S('rifleman', 214, 66, { yaw: -Math.PI / 2, state: 'idle' });
+      S('guard', 118, 62, { route: routeOf([[118, 62, 2], [196, 62, 3]]) });
+      S('guard', 187, 22, { route: routeOf([[187, 22, 2], [187, 5, 2], [168, 5, 2]]), lantern: true });
+      N.addInteractable({ id: 'cache', x: G.world.LOC.cache.x - 0.6, z: G.world.LOC.cache.z + 0.6, r: 2.2, prompt: 'Dig beneath the ballast', once: true, dur: 1.6, delay: 1.3,
+        enabled: () => N.si >= 1,
+        use(N) {
+          N.spawnFragment('P2', G.player.pos.x, G.player.pos.z, G.player.pos.y + 1.0);
+          N.flags.cacheOpened = true;
+        } });
+    },
+    steps: [
+      { obj: 'Find the cache in the Industrial District.', wp: () => G.world.LOC.industrialGate,
+        enter(N) { N.after(3, () => N.say('VARGA', 'Vesna. The safehouse is behind you. Come inside.')); N.after(16, () => { if (N.si === 0) N.say('VARGA', 'Return to the safehouse. That is not a request.'); }); },
+        check: () => G.player.pos.x > 104 },
+      { obj: 'Search beneath the third crane from the gate.', wp: () => G.world.LOC.cache,
+        enter(N) {
+          N.say('VARGA', 'Very well. I cannot stop you. There are men by the furnaces who do not sleep, and one who does not feel the cold.');
+          N.after(6, () => N.hint('Burning barrels and idling engines warm the arm. Hold <span class="kbd">E</span> beside one.', 8));
+        },
+        update(N) {
+          if (!N.flags.hBrute) { const b = G.ai.enemies.find((e) => e.type === 'brute' && e.alive); if (b && Math.hypot(b.pos.x - G.player.pos.x, b.pos.z - G.player.pos.z) < 22) { N.flags.hBrute = true; N.hint('Heavy men block light strikes. Break their guard with a Polar Strike, or parry them. Jump their stomp.', 10); } }
+        },
+        check: (N) => N.collected.has('P2') && !N.fragScene,
+        done(N) {
+          N.showDocument(DOCS.thaw, () => {
+            N.sayAll([['VARGA', '...'], ['VARGA', 'You are not supposed to remember that.', { hold: 2.6 }], ['VARGA', 'If you go north, do not take the road. It is watched. Go through the forest, past the lake.']], () => N.nextMission());
+            N.setObjective('Listen.', null);
+          });
+        } },
+    ],
+  },
+  // ================================================================ MISSION 3
+  {
+    id: 'm3', num: 'MISSION 3', title: 'THE FOREST',
+    start(N, fromCp) {
+      const p = G.player;
+      if (fromCp) { p.place(177.5, 18.5, Math.PI, 0.3); G.cameraRig.snapBehind(Math.PI); }
+      const S = (t, x, z, o) => G.ai.spawn(t, x, z, Object.assign({ tag: 'm3' }, o));
+      S('guard', -3, -19, { yaw: 0, state: 'idle' });
+      S('guard', 4.5, -11, { yaw: 0.3, state: 'idle' });
+      S('rifleman', -9, -22, { yaw: 0.25, state: 'idle' });
+      S('guard', -31, -44, { route: routeOf([[-31, -44, 2], [-34, -62, 2], [-46, -80, 3]]), lantern: true });
+      S('guard', -50, -146, { route: routeOf([[-50, -146, 2], [-52, -168, 3], [-56, -190, 2]]), lantern: true });
+    },
+    steps: [
+      { obj: 'Cross the forest toward the Directorate facility.', wp: () => G.world.LOC.lakeWest,
+        enter(N) {
+          N.after(4, () => N.say('VARGA', 'It is very cold in the forest. There is a hunting shelter on the trail by the lake. Use it.'));
+          N.after(12, () => N.hint('Wind and open ice steal heat fast. Cold strikes are brutal but slow. Warm ones are quick.', 9));
+        },
+        check: (N) => Math.hypot(G.player.pos.x - LAYOUT.lake.x, G.player.pos.z - LAYOUT.lake.z) < 34 },
+      { obj: 'Someone is on the ice.', wp: null,
+        enter(N) {
+          const L = LAYOUT.lake;
+          const sx = L.x + 10, sz = L.z - 12;
+          const v = G.ai.spawn('vesna6', sx, sz, { tag: 'vesna6', state: 'scripted', hp: 200, dmgMul: 0.8, hooks: {
+            onDamage(e, h) { N.flags.v6Hit = true; if (e.hp / e.maxHp <= 0.3 && !N.flags.v6Kneel) MISSIONS[3].v6Kneel(N, e, 'beaten'); },
+            onZero(e) { if (!N.flags.v6Kneel) MISSIONS[3].v6Kneel(N, e, 'beaten'); },
+          } });
+          v.noTakedown = true; v.alwaysActive = true;
+          v.scripted = { update(dt, e) { const p = G.player, d = Math.hypot(p.pos.x - e.pos.x, p.pos.z - e.pos.z); if (d > 6.5) e.moveTo(p.pos.x, p.pos.z, 1.5, dt, 6); return { face: Math.atan2(p.pos.x - e.pos.x, p.pos.z - e.pos.z) }; } };
+          N.radio.clear();
+          N.sayAll([['UNKNOWN', 'Seven. They sent you the long way round.'], ['VESNA-6', 'I was Six. Before that I was a lineman, a sailor, a boy from Tula. Ask me which.'], ['VESNA-6', 'Show me whose hands they gave you.']], () => {
+            if (!v.alive || N.flags.v6Kneel) return;
+            v.toCombat(); v.cooldown = 0.8; N.flags.v6FightT = N.missionT; G.ui.boss('VESNA-6', 1);
+            N.setObjective('Survive VESNA-6. Or refuse to fight him.', null);
+            N.hint('Strike him down, or only block, parry and dodge. He may stop if you never strike.', 9);
+          });
+        },
+        update(N) {
+          const v = G.ai.byTag('vesna6')[0];
+          if (v && v.alive && !N.flags.v6Kneel && N.flags.v6FightT !== undefined) {
+            G.ui.boss('VESNA-6', v.hp / v.maxHp);
+            const restraint = !N.flags.v6Hit && N.missionT - N.flags.v6FightT > 13;
+            if (restraint) MISSIONS[3].v6Kneel(N, v, 'restraint');
+          }
+          if (N.flags.v6Kneel && !N.flags.v6Decided) {
+            G.ui.prompt('<span class="kbd">E</span> Spare him &nbsp;&middot;&nbsp; <span class="kbd">F</span> Finish him');
+            const inp = G.input;
+            if (inp.consume('interact', 0.3)) MISSIONS[3].v6Decide(N, v, 'spare');
+            else if (inp.consume('polar', 0.3) || inp.consume('attack', 0.3)) MISSIONS[3].v6Decide(N, v, 'finish');
+          }
+        },
+        check: (N) => N.flags.v6Resolved },
+      { obj: 'Reach the Directorate facility.', wp: () => G.world.LOC.breach,
+        enter(N) { N.after(N.flags.v6 === 'spared' ? 9 : 3, () => N.say('VARGA', N.flags.v6 === 'spared' ? 'Vesna? Your signal dropped by the lake. Are you hurt?' : 'It is done, then. Keep moving. The facility is north-west.')); },
+        check: (N) => N.near(G.world.LOC.breach, 14),
+        done(N) { N.nextMission(); } },
+    ],
+    v6Kneel(N, v, why) {
+      N.flags.v6Kneel = true; N.flags.v6Why = why;
+      v.interrupt(); v.setState('yield'); v.untargetable = true; v.anim.play('yieldKneel', { blend: 0.3 });
+      G.ui.boss(null); G.cameraRig.lockTarget = null;
+      const p = G.player;
+      playerScripted(p, (dt, pl) => { pl.targetYaw = yawTo(pl.pos.x, pl.pos.z, v.pos.x, v.pos.z); pl.yaw = dampAngle(pl.yaw, pl.targetYaw, 6, dt); pl.anim.P.combat = 1; });
+      N.radio.clear();
+      N.say('VESNA-6', why === 'restraint' ? 'You will not strike me. Neither would he. The one who greeted the trains.' : 'Enough. You have his hands, at least. The heavy ones.', { hold: 2.4 });
+      N.setObjective('Decide.', null);
+    },
+    v6Decide(N, v, choice) {
+      N.flags.v6Decided = true; N.flags.v6 = choice === 'spare' ? 'spared' : 'killed';
+      G.ui.prompt(null);
+      const p = G.player;
+      N.radio.clear();
+      if (choice === 'spare') {
+        N.sayAll([['VESNA-6', 'They gave you three men’s hands. I have five. None of them are mine.', { hold: 2.6 }], ['VESNA-6', 'There was no man under us, Seven. They built the house and never put anyone in it.', { hold: 2.8 }], ['VESNA-6', 'Ask the woman on the radio what she recorded. Then choose.', { hold: 2.2 }]], () => {
+          v.anim.play('move', { blend: 0.4 }); v.untargetable = true;
+          N.spawnFragment('V6', v.pos.x, v.pos.z);
+          const away = { x: v.pos.x + (v.pos.x - p.pos.x) * 6, z: v.pos.z + (v.pos.z - p.pos.z) * 6 };
+          v.setState('scripted'); v.scripted = { t: 0, update(dt, e) { this.t += dt; e.moveTo(away.x, away.z, 1.9, dt, 1); if (this.t > 5) { e.fade = Math.max(0, 1 - (this.t - 5) / 2); e.char.setOpacity(e.fade); if (e.fade <= 0) e.remove(); } return null; } };
+          playerFree(p); N.flags.v6Resolved = true;
+        });
+      } else {
+        p.anim.play('formalStrike', { blend: 0.08, restart: true });
+        N.after(0.15, () => { G.audio.takedown(v.pos); G.cameraRig.addTrauma(0.3); G.game.hitStop(0.08); v.untargetable = false; v.yields = false; v.hooks = {}; v.die({ front: true }); });
+        N.after(1.2, () => { N.say('VESNA-6', 'Good. One fewer of us to forget.', { hold: 2.4 }); playerFree(p); N.flags.v6Resolved = true; });
+      }
+    },
+  },
+  // ================================================================ MISSION 4
+  {
+    id: 'm4', num: 'MISSION 4', title: 'THE FACILITY',
+    start(N, fromCp) {
+      const p = G.player, L = G.world.LOC;
+      if (fromCp) { p.place(-46, -216, -Math.PI / 2, 0.5); G.cameraRig.snapBehind(-Math.PI / 2); }
+      const F = LAYOUT.facility, S = (t, x, z, o) => G.ai.spawn(t, x, z, Object.assign({ tag: 'm4' }, o));
+      S('rifleman', F.x1 - 4, F.z1 - 4, { y: 6.25, stationary: true, state: 'idle', yaw: -2.5 });
+      S('rifleman', F.x0 + 4, F.z0 + 4, { y: 6.25, stationary: true, state: 'idle', yaw: 0.75 });
+      S('guard', -180, -212, { route: routeOf([[-180, -212, 3], [-102, -214, 3]]) });
+      S('guard', -150, -186, { route: routeOf([[-150, -186, 2], [-150, -222, 2]]), lantern: true });
+      S('guard', -90, -232, { route: routeOf([[-90, -232, 2], [-72, -204, 3]]) });
+      S('guard', -134, -224.4, { state: 'idle', yaw: 0 });
+      S('guard', -125.8, -224.4, { state: 'idle', yaw: 0.2 });
+      S('brute', -132, -213, { state: 'idle', yaw: 0.4 });
+      S('guard', -145, -238.4, { y: 0.1, route: routeOf([[-145, -238.4, 3], [-112.5, -238.4, 3]]) });
+      S('guard', -137.5, -243.3, { y: 0.1, state: 'idle', yaw: Math.PI / 2 });
+      N.addInteractable({ id: 'files', x: L.files.x, z: L.files.z, y: 0.1, r: 1.9, prompt: 'Read the conditioning files', once: true, dur: 1.2, delay: 0.8,
+        enabled: () => N.si >= 1,
+        use(N) { N.showDocument(DOCS.files, () => MISSIONS[4].afterFiles(N)); } });
+    },
+    steps: [
+      { obj: 'Infiltrate the facility. Find the bunker.', wp: () => G.world.LOC.bunkerDoor,
+        enter(N) { N.after(1.5, () => N.sayAll([['VARGA', 'The conditioning files are in the bunker. Orlov keeps them close. He reads them at night.'], ['VARGA', 'There is a gap in the east fence. I asked for it to be repaired in October. I made sure the request was lost.']])); },
+        check: () => G.world.isIndoors(G.player.pos.x, G.player.pos.y + 1, G.player.pos.z) && G.player.pos.z < -228 },
+      { obj: 'Recover the conditioning files.', wp: () => ({ x: G.world.LOC.files.x, z: G.world.LOC.files.z, y: 0 }),
+        enter(N) { N.say('VARGA', 'The desk at the far end. Quickly.'); },
+        check: (N) => N.flags.filesRead,
+        done(N) { N.nextMission(); } },
+    ],
+    afterFiles(N) {
+      N.setObjective('Listen.', null);
+      N.sayAll([
+        ['VARGA', 'There was never a man to give back to you. I am sorry. But you can still choose one.', { hold: 3.2 }],
+        ['VARGA', 'I have been slowing your reconditioning for months. Every session, a little less. I wanted something of you to survive.', { hold: 3.2 }],
+        ['ORLOV', 'All units. Operation Thaw proceeds at the bridge. Bring me Seven, if he is still Seven.', { hold: 2.4, onStart: () => G.audio.klaxon(6) }],
+        ['VARGA', 'He is moving the trucks to the bridge. If the shooting starts there, it will not stop. Go, Vesna.'],
+      ], () => { N.flags.filesRead = true; });
+    },
+  },
+  // ================================================================ FINALE
+  {
+    id: 'finale', num: 'FINALE', title: 'THE RIVER CROSSING',
+    start(N, fromCp, stepIndex) {
+      const p = G.player, L = G.world.LOC, F = LAYOUT.facility;
+      G.world.openGate(G.world.neGate); N.flags.neGateOpen = true;
+      if (stepIndex >= 2) { p.place(60, -260, Math.PI, 0.6); G.cameraRig.snapBehind(Math.PI); }
+      else {
+        if (fromCp) { p.place(-121, -241.5, Math.PI, 0.1); G.cameraRig.snapBehind(Math.PI); }
+        const S = (t, x, z, o) => G.ai.spawn(t, x, z, Object.assign({ tag: 'm5' }, o));
+        const r1 = S('guard', -133, -221, { state: 'search' }), r2 = S('guard', -124, -219, { state: 'search' }), r3 = S('brute', -140, -214, { state: 'search' });
+        for (const e of [r1, r2, r3]) { e.lastKnown.set(-130, 0, -226); e.aware = true; }
+        S('rifleman', F.x1 - 4, F.z1 - 4, { y: 6.25, stationary: true, state: 'idle', yaw: -2.5 });
+        const B = (t, x, z, o) => G.ai.spawn(t, x, z, Object.assign({ tag: 'bridge' }, o));
+        B('guard', 56, -240, { state: 'idle', yaw: -Math.PI / 2 });
+        B('guard', 64.5, -243.5, { state: 'idle', yaw: -Math.PI / 2 });
+        B('rifleman', 47.5, -246.5, { state: 'idle', yaw: -Math.PI / 2 });
+        B('rifleman', 71.5, -253, { state: 'idle', yaw: -2.0 });
+      }
+      const B = (t, x, z, o) => G.ai.spawn(t, x, z, Object.assign({ tag: 'bridge' }, o));
+      B('rifleman', 57.5, -279.2, { state: 'idle', yaw: 0 });
+      B('rifleman', 62.8, -283.2, { state: 'idle', yaw: 0 });
+      const o = G.ai.spawn('orlov', 58, -288, { tag: 'orlov', name: 'Orlov', state: 'scripted', yaw: 0, hp: CONFIG.enemies.orlov.hp, hooks: {
+        onDamage(e) { MISSIONS[5].orlovPhase(N, e); },
+        onZero(e) { MISSIONS[5].orlovDown(N, e); },
+      } });
+      o.noTakedown = true; o.alwaysActive = true; o.homeYaw = 0;
+      o.scripted = { update(dt, e) { const p = G.player; return { face: Math.atan2(p.pos.x - e.pos.x, p.pos.z - e.pos.z) }; } };
+    },
+    update(N) {
+      const o = G.ai.byTag('orlov')[0];
+      if (o && o.alive && N.flags.orlovFight && !N.flags.orlovDown) G.ui.boss('COLONEL MATVEI ORLOV', o.hp / o.maxHp);
+    },
+    steps: [
+      { obj: 'Stop Orlov at the border bridge.', wp: () => G.world.LOC.bridgeStart,
+        enter(N) { N.after(2.5, () => N.hint('The north-east gate is open. Follow the river road east to the bridge.', 8)); },
+        check: (N) => N.near(G.world.LOC.bridgeStart, 26) },
+      { obj: 'Fight through to Orlov.', wp: () => G.world.LOC.bridgeMid,
+        enter(N) { N.say('ORLOV', 'Vesna-Seven. You are early. Good. I hate to wait in the cold.', { hold: 2.6 }); },
+        check: () => G.player.pos.z < -263 && G.player.pos.x > 52 && G.player.pos.x < 68,
+        done(N) { N.saveCheckpoint(2); N.nextStep(); } },
+      { obj: 'Defeat Colonel Orlov.', wp: null,
+        enter(N) {
+          const o = G.ai.byTag('orlov')[0];
+          N.radio.clear();
+          N.sayAll([['ORLOV', 'Do you know what a war costs, if it is fought late? Everything. Fought early, it costs a bridge.', { hold: 2.4 }]], () => {
+            if (o && o.alive && !N.flags.orlovDown) { o.toCombat(); o.cooldown = 0.6; N.flags.orlovFight = true; }
+          });
+          for (const e of G.ai.byTag('bridge')) if (e.alive && !e.inCombat) e.toAlert(true);
+        },
+        check: (N) => N.flags.choiceReady,
+        done(N) { N.showChoice(); } },
+    ],
+    orlovPhase(N, e) {
+      const k = e.hp / e.maxHp, O = CONFIG.enemies.orlov;
+      if (!N.flags.orlovP2 && k <= O.phase2) {
+        N.flags.orlovP2 = true;
+        e.interrupt(); e.invulnerable = true; e.setState('scripted'); e.anim.play('summon', { blend: 0.2, restart: true });
+        e.scripted = { t: 0, update(dt, en) { this.t += dt; if (this.t > 2.1) { en.invulnerable = false; en.mode = 'guarded'; en.toCombat(); en.anim.play('move', { blend: 0.2 }); } const p = G.player; return { face: Math.atan2(p.pos.x - en.pos.x, p.pos.z - en.pos.z) }; } };
+        N.radio.clear();
+        N.say('ORLOV', 'Riflemen! The far barricade!', { hold: 1.6 });
+        N.after(1.0, () => { for (const x of [56.5, 63.5]) { const r = G.ai.spawn('rifleman', x, -300.6, { tag: 'bridge', state: 'combat' }); r.cooldown = 1.5 + Math.random(); } });
+        N.after(3.2, () => N.say('VARGA', 'Riflemen on the far barricade. Keep him between you and them.'));
+      }
+      if (!N.flags.orlovP3 && k <= O.phase3) {
+        N.flags.orlovP3 = true; e.mode = 'fast';
+        N.say('ORLOV', 'I made you out of better men than either of us. You owe me the use of them.', { hold: 2.2 });
+        G.audio.bark(e.pos, 'alert');
+      }
+    },
+    orlovDown(N, e) {
+      if (N.flags.orlovDown) return;
+      N.flags.orlovDown = true;
+      e.untargetable = true; e.setState('yield'); e.anim.play('yieldKneel', { blend: 0.3 });
+      G.ui.boss(null); G.cameraRig.lockTarget = null;
+      for (const o of G.ai.enemies) if (o !== e && o.alive) { o.interrupt(); o.setState('yield'); o.untargetable = true; o.anim.play('handsUp', { blend: 0.3 }); }
+      G.audio.setCombat(0);
+      const p = G.player;
+      playerScripted(p, (dt, pl) => { pl.targetYaw = yawTo(pl.pos.x, pl.pos.z, e.pos.x, e.pos.z); pl.yaw = dampAngle(pl.yaw, pl.targetYaw, 5, dt); });
+      N.radio.clear();
+      N.sayAll([
+        ['ORLOV', 'Then decide what you are. Quickly. The other side is watching this bridge.', { hold: 2.6 }],
+        ['VARGA', 'Vesna. It is over. Operation Thaw is over.', { hold: 2.0 }],
+        ['VARGA', 'Now there is only you.', { hold: 2.4 }],
+      ], () => { N.flags.choiceReady = true; });
+      N.setObjective('Decide who you are.', null);
+    },
+  },
+];
+
+// =====================================================================================
 // 13. UI
 // HUD, compass, world-space markers, menus, journal, subtitles, documents, endings.
 // DOM writes are throttled to values that actually changed.
@@ -6165,7 +7046,7 @@ class UI {
     for (const id of ['loading', 'loadFill', 'loadMsg', 'title', 'hud', 'objective', 'objText', 'missionCard', 'mcNum', 'mcTitle', 'hpFill', 'hpGhost', 'stFill', 'charge', 'heatFill', 'heatLabel', 'heatIcon',
       'hint', 'prompt', 'subs', 'subSpeaker', 'subText', 'markers', 'fragScene', 'fragOwner', 'fragText', 'toast', 'fps', 'journal', 'jCols', 'jExtra', 'pause', 'pauseMeta',
       'controlsPanel', 'settingsPanel', 'doc', 'docPaper', 'choice', 'choiceOpts', 'choiceMeta', 'nameEntry', 'nameInput', 'ending', 'endLines', 'endCard', 'endName', 'endSub', 'endKicker',
-      'gameover', 'goSub', 'resume', 'compassCv', 'bossBar', 'bossFill', 'bossName', 'btnContinue']) this.el[id] = $(id);
+      'gameover', 'goSub', 'resume', 'compassCv', 'bossBar', 'bossFill', 'bossName', 'btnContinue', 'fragHint']) this.el[id] = $(id);
     this.cache = {};
     this.chargeCells = Array.from(this.el.charge.querySelectorAll('b'));
     this.compass = this.el.compassCv.getContext('2d');
@@ -6268,6 +7149,7 @@ class UI {
     if (progress !== undefined) { const i = this.el.prompt.querySelector('.bar2 i'); if (i) i.style.width = (clamp01(progress) * 100).toFixed(0) + '%'; }
   }
   toast(text) {
+    while (this.el.toast.children.length >= 4) this.el.toast.firstChild.remove();
     const d = document.createElement('div'); d.textContent = text; this.el.toast.appendChild(d);
     setTimeout(() => { d.style.transition = 'opacity .6s'; d.style.opacity = 0; setTimeout(() => d.remove(), 700); }, 3600);
   }
@@ -6334,6 +7216,47 @@ class UI {
     return out.x > -40 && out.x < window.innerWidth + 40 && out.y > -40 && out.y < window.innerHeight + 40;
   }
   fps(text) { this.setText('fps', this.el.fps, text); }
+
+  // ---------------------------------------------------------------- subtitles, fragment scenes, endings
+  subtitle(speaker, text, typing) {
+    const s = this.el.subs;
+    if (speaker === null || speaker === undefined) { s.style.opacity = 0; return; }
+    s.style.opacity = 1;
+    this.setText('subSp', this.el.subSpeaker, speaker === 'VESNA-7' ? 'VESNA-7 (to himself)' : speaker === 'UNKNOWN' ? 'UNKNOWN FREQUENCY' : speaker);
+    this.el.subText.style.fontStyle = speaker === 'VESNA-7' ? 'italic' : 'normal';
+    this.el.subText.innerHTML = escapeHTML(text) + (typing ? '<span class="cur"></span>' : '');
+  }
+  fragment(owner, color, text) {
+    const f = this.el.fragScene;
+    this.el.fragOwner.textContent = owner; this.el.fragOwner.style.color = color;
+    this.el.fragText.textContent = text; this.el.fragText.style.color = color;
+    this.el.fragHint.style.visibility = 'hidden';
+    f.style.opacity = 0; this.show('fragScene');
+    requestAnimationFrame(() => { f.style.opacity = 1; });
+    this.clearHint();
+  }
+  fragmentHint(on) { this.el.fragHint.style.visibility = on ? 'visible' : 'hidden'; }
+  fragmentHide() { const f = this.el.fragScene; f.style.opacity = 0; setTimeout(() => { if (f.style.opacity === '0') this.show('fragScene', false); }, 650); }
+  ending(E) {
+    const el = this.el.ending;
+    this.show('hud', false); this.show('choice', false);
+    clearTimeout(this._endT1);
+    el.classList.toggle('light', E.color === '#ffffff');
+    el.style.background = '#000'; el.style.opacity = 0;
+    this.el.endLines.style.display = ''; this.el.endLines.style.opacity = 1;
+    this.el.endLines.innerHTML = E.lines.map((l) => `<p>${escapeHTML(l)}</p>`).join('');
+    this.el.endCard.classList.remove('on');
+    this.el.endKicker.textContent = E.kicker; this.el.endName.textContent = E.name; this.el.endSub.textContent = E.sub;
+    const ps = [...this.el.endLines.querySelectorAll('p')];
+    const T = [];
+    T.push(setTimeout(() => { this.show('ending'); el.style.transition = 'opacity 1.6s, background 2s'; el.style.opacity = 1; el.style.background = E.color; }, 2600));
+    ps.forEach((p, i) => T.push(setTimeout(() => p.classList.add('on'), 4200 + i * 3800)));
+    const endT = 4200 + ps.length * 3800 + 1800;
+    T.push(setTimeout(() => { this.el.endLines.style.transition = 'opacity 1.4s'; this.el.endLines.style.opacity = 0; }, endT));
+    T.push(setTimeout(() => { this.el.endLines.style.display = 'none'; this.el.endCard.classList.add('on'); }, endT + 1500));
+    this._endTimers = T;
+  }
+  cancelEnding() { if (this._endTimers) this._endTimers.forEach(clearTimeout); this._endTimers = null; }
 }
 
 // =====================================================================================
@@ -6572,7 +7495,7 @@ class Game {
   closeDocument() { if (G.narrative) G.narrative.closeDocument(); }
   onPlayerDeath() { if (G.narrative) G.narrative.onPlayerDeath(); }
   retryCheckpoint() { G.audio.uiClick(); G.ui.show('gameover', false); G.ui.show('pause', false); if (G.narrative) G.narrative.loadCheckpoint(); this.startPlay(); }
-  quitToTitle() { G.audio.uiClick(); if (G.narrative) G.narrative.stopAll(); this.toTitle(); }
+  quitToTitle() { G.audio.uiClick(); G.ui.cancelEnding(); if (G.narrative) G.narrative.stopAll(); this.fade.white = 0; this.fade.targetWhite = 0; G.ui.show('ending', false); this.toTitle(); }
   hitStop(t) { this.hitStopT = Math.max(this.hitStopT, t); }
   slowMo(t, scale) { this.slowT = Math.max(this.slowT, t); this.slowScale = scale; }
 
