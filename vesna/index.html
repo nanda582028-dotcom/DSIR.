@@ -4684,8 +4684,8 @@ class Player {
       this.startAttack(C.light[idx], idx, mag, mx, mz, lock);
       return;
     }
-    // interact (E): takedown, objects, warming
-    if (inp.isDown('interact') && !fromParry) this.tryInteract();
+    // interact (E): takedown and objects on press, warming on hold
+    if (!fromParry && (inp.isDown('interact') || inp.peek('interact', 0.2))) this.tryInteract();
   }
   tryInteract() {
     const inp = G.input;
@@ -4693,7 +4693,7 @@ class Player {
     if (td && inp.consume('interact', 0.3)) { this.startTakedown(td); return; }
     const it = G.narrative ? G.narrative.interactCandidate(this) : null;
     if (it && inp.consume('interact', 0.3)) { G.narrative.useInteractable(it); return; }
-    if (!td && !it) {
+    if (!td && !it && inp.isDown('interact')) {
       const hsrc = G.lights.nearestHeat(this.pos.x, this.pos.z);
       if (hsrc && this.heat < CONFIG.heat.max - 0.5 && Math.abs(hsrc.y - 0.8 - this.pos.y) < 2.5) { inp.consume('interact', 0.5); this.startWarm(hsrc); }
     }
@@ -5391,21 +5391,44 @@ class NavGrid {
   }
 }
 
-// ------------------------------------------------------------------ laser sights (one draw call for all riflemen)
+// ------------------------------------------------------------------ laser sights (camera-facing ribbons, one draw call)
 class LaserLines {
   constructor(scene, max = 10) {
     this.max = max; this.n = 0;
-    this.pos = new Float32Array(max * 6);
+    this.pos = new Float32Array(max * 4 * 3); this.uv = new Float32Array(max * 4 * 2);
+    const idx = [];
+    for (let i = 0; i < max; i++) { const b = i * 4; idx.push(b, b + 1, b + 2, b, b + 2, b + 3); this.uv.set([0, -1, 0, 1, 1, 1, 1, -1], i * 8); }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('luv', new THREE.BufferAttribute(this.uv, 2));
+    g.setIndex(idx);
     this.geo = g;
-    this.mesh = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: new THREE.Color(2.4, 0.15, 0.1), transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    const mat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      uniforms: { uTime: FOG_U.uTime },
+      vertexShader: 'attribute vec2 luv; varying vec2 vUv; void main(){ vUv = luv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: 'varying vec2 vUv; uniform float uTime; void main(){ float c = 1.0 - abs(vUv.y); float a = pow(c, 2.5) + pow(c, 12.0) * 2.0; float flick = 0.75 + 0.25 * sin(uTime * 40.0 + vUv.x * 30.0); gl_FragColor = vec4(vec3(2.6, 0.12, 0.06) * a * flick * (0.4 + 0.6 * vUv.x), 1.0); }',
+    });
+    this.mesh = new THREE.Mesh(g, mat);
     this.mesh.frustumCulled = false; this.mesh.renderOrder = 10;
     scene.add(this.mesh);
   }
   begin() { this.n = 0; }
-  add(a, b) { if (this.n >= this.max) return; const o = this.n * 6; this.pos[o] = a.x; this.pos[o + 1] = a.y; this.pos[o + 2] = a.z; this.pos[o + 3] = b.x; this.pos[o + 4] = b.y; this.pos[o + 5] = b.z; this.n++; }
-  end() { this.geo.setDrawRange(0, this.n * 2); this.geo.attributes.position.needsUpdate = true; this.mesh.visible = this.n > 0; }
+  add(a, b, width = 0.035) {
+    if (this.n >= this.max) return;
+    const cam = G.camera.position;
+    const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+    const mx = (a.x + b.x) / 2 - cam.x, my = (a.y + b.y) / 2 - cam.y, mz = (a.z + b.z) / 2 - cam.z;
+    let px = dy * mz - dz * my, py = dz * mx - dx * mz, pz = dx * my - dy * mx;
+    const pl = Math.hypot(px, py, pz) || 1; px = px / pl * width; py = py / pl * width; pz = pz / pl * width;
+    const o = this.n * 12, P = this.pos;
+    P[o] = a.x - px; P[o + 1] = a.y - py; P[o + 2] = a.z - pz;
+    P[o + 3] = a.x + px; P[o + 4] = a.y + py; P[o + 5] = a.z + pz;
+    P[o + 6] = b.x + px; P[o + 7] = b.y + py; P[o + 8] = b.z + pz;
+    P[o + 9] = b.x - px; P[o + 10] = b.y - py; P[o + 11] = b.z - pz;
+    this.n++;
+  }
+  end() { this.geo.setDrawRange(0, this.n * 6); this.geo.attributes.position.needsUpdate = true; this.mesh.visible = this.n > 0; }
 }
 
 const BARKS = {
@@ -6097,12 +6120,14 @@ class AIManager {
       if (e.rifle && e.rifle.phase === 'warn') {
         const m = e.muzzle(_eA);
         const dx = e.rifle.aim.x - m.x, dy = e.rifle.aim.y - m.y, dz = e.rifle.aim.z - m.z, L = Math.hypot(dx, dy, dz) || 1;
-        const t = Math.min(L + 6, G.colliders.raycast(m.x, m.y, m.z, dx / L, dy / L, dz / L, L + 6, 'sight'));
+        const t = Math.min(L, G.colliders.raycast(m.x, m.y, m.z, dx / L, dy / L, dz / L, L, 'sight'));
         _eB.set(m.x + dx / L * t, m.y + dy / L * t, m.z + dz / L * t);
-        this.laser.add(m, _eB);
-        const blink = 0.6 + 0.4 * Math.sin(performance.now() / 40);
-        G.dynGlows.push(_eB.x, _eB.y, _eB.z, 1.4 * blink, 0.08, 0.05, 0.18);
-        G.dynGlows.push(m.x, m.y, m.z, 0.8, 0.05, 0.03, 0.12);
+        const urgency = clamp01(e.rifle.t / CONFIG.enemies.rifleman.shot.warn);
+        this.laser.add(m, _eB, 0.02 + 0.03 * urgency);
+        const blink = 0.6 + 0.4 * Math.sin(performance.now() / (60 - 35 * urgency));
+        G.dynGlows.push(_eB.x, _eB.y, _eB.z, 2.2 * blink, 0.12, 0.06, 0.22 + 0.2 * urgency);
+        G.dynGlows.push(_eB.x, _eB.y, _eB.z, 0.35 * blink, 0.02, 0.01, 0.9);
+        G.dynGlows.push(m.x, m.y, m.z, 1.4, 0.08, 0.04, 0.16);
       }
     }
     this.laser.end();
